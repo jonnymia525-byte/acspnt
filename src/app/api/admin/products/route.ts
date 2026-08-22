@@ -1,0 +1,125 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { cookies } from "next/headers";
+
+async function requireAdmin() {
+  const cookieStore = await cookies();
+  const userId = cookieStore.get("accsm_user_id")?.value;
+  if (!userId) return null;
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user || user.role !== "admin") return null;
+  return user;
+}
+
+// GET - fetch products for review
+export async function GET(req: Request) {
+  const admin = await requireAdmin();
+  if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const url = new URL(req.url);
+  const action = url.searchParams.get("action") || "list";
+
+  if (action === "list") {
+    const status = url.searchParams.get("status") || undefined;
+    const products = await prisma.product.findMany({
+      where: status ? { status } : {},
+      select: {
+        id: true, title: true, description: true, platform: true, category: true,
+        vendorPrice: true, storePrice: true, stock: true, status: true,
+        deliveryFormat: true, countryRegister: true, originalMail: true,
+        country: true, createdAt: true, accountsData: true,
+        vendor: { select: { id: true, username: true, name: true, vendorStatus: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
+    // Check for duplicates: same title + vendor
+    const titleVendorMap = new Map<string, number>();
+    products.forEach(p => {
+      const key = `${p.title}::${p.vendor.id}`;
+      titleVendorMap.set(key, (titleVendorMap.get(key) || 0) + 1);
+    });
+    const productsWithMeta = products.map(p => ({
+      ...p,
+      isDuplicate: (titleVendorMap.get(`${p.title}::${p.vendor.id}`) || 0) > 1,
+    }));
+    return NextResponse.json({ products: productsWithMeta });
+  }
+
+  if (action === "detail") {
+    const productId = url.searchParams.get("productId");
+    if (!productId) return NextResponse.json({ error: "productId required" }, { status: 400 });
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        vendor: { select: { id: true, username: true, name: true, email: true, vendorStatus: true, balance: true } },
+        listing: { select: { id: true, title: true, platform: true } },
+        purchases: { select: { id: true, quantity: true, total: true, status: true, createdAt: true, buyer: { select: { username: true } } }, orderBy: { createdAt: "desc" }, take: 20 },
+        reviews: { select: { id: true, rating: true, comment: true, createdAt: true, buyer: { select: { username: true } } }, orderBy: { createdAt: "desc" }, take: 10 },
+      },
+    });
+    if (!product) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ product });
+  }
+
+  return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+}
+
+// POST - admin product actions
+export async function POST(req: Request) {
+  const admin = await requireAdmin();
+  if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const body = await req.json();
+  const { action, productId, ...data } = body;
+
+  if (!productId) return NextResponse.json({ error: "productId required" }, { status: 400 });
+
+  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, title: true, vendorId: true, vendorPrice: true, stock: true, status: true } });
+  if (!product) return NextResponse.json({ error: "Product not found" }, { status: 404 });
+
+  switch (action) {
+    case "approve": {
+      await prisma.product.update({ where: { id: productId }, data: { status: "approved", visible: true } });
+      await prisma.activityLog.create({ data: { action: "product_approved", description: `Admin approved "${product.title}"`, userId: admin.id } });
+      await prisma.notification.create({ data: { userId: product.vendorId, title: "Product Approved", message: `Your product "${product.title}" has been approved and is now live.` } });
+      return NextResponse.json({ success: true });
+    }
+
+    case "reject": {
+      if (!data.reason) return NextResponse.json({ error: "reason required" }, { status: 400 });
+      await prisma.product.update({ where: { id: productId }, data: { status: "rejected", visible: false } });
+      await prisma.activityLog.create({ data: { action: "product_rejected", description: `Admin rejected "${product.title}": ${data.reason}`, userId: admin.id } });
+      await prisma.notification.create({ data: { userId: product.vendorId, title: "Product Rejected", message: `Your product "${product.title}" was rejected. Reason: ${data.reason}` } });
+      return NextResponse.json({ success: true });
+    }
+
+    case "delete": {
+      // Notify vendor
+      await prisma.notification.create({ data: { userId: product.vendorId, title: "Product Removed", message: `Your product "${product.title}" has been removed by admin.` } });
+      await prisma.activityLog.create({ data: { action: "product_deleted", description: `Admin deleted "${product.title}"`, userId: admin.id } });
+      await prisma.product.delete({ where: { id: productId } });
+      return NextResponse.json({ success: true });
+    }
+
+    case "edit": {
+      const updates: Record<string, unknown> = {};
+      if (data.title !== undefined) updates.title = data.title;
+      if (data.description !== undefined) updates.description = data.description;
+      if (data.vendorPrice !== undefined) {
+        const newVp = parseFloat(data.vendorPrice);
+        updates.vendorPrice = newVp;
+        updates.storePrice = Math.round(newVp * 1.4 * 100) / 100;
+      }
+      if (data.stock !== undefined) updates.stock = parseInt(data.stock);
+      if (data.category !== undefined) updates.category = data.category;
+      if (data.platform !== undefined) updates.platform = data.platform;
+      const updated = await prisma.product.update({ where: { id: productId }, data: updates });
+      await prisma.activityLog.create({ data: { action: "product_edited", description: `Admin edited "${product.title}"`, userId: admin.id } });
+      return NextResponse.json({ success: true, product: updated });
+    }
+
+    default:
+      return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+  }
+}

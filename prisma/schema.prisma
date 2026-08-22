@@ -1,0 +1,365 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  username      String    @unique
+  password      String
+  name          String    @default("")
+  role          String    @default("buyer")
+  balance       Float     @default(0)
+  vendorStatus  String    @default("none")
+  vendorReason  String    @default("")
+  vendorCountry String    @default("")
+  contactMethod String    @default("")
+  contactDetail String    @default("")
+  twoFaEnabled  Boolean   @default(false)
+  twoFaSecret   String?
+  backupCodes   String?
+  muted         Boolean   @default(false)
+  mutedUntil    DateTime?
+  blocked       Boolean   @default(false)
+  registeredAt  DateTime  @default(now())
+  registrationIp String?
+  lastLogin     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  ownedListings     Listing[]
+  ownedProducts     Product[]
+  purchases         Purchase[]
+  deposits          Deposit[]
+  disputes          Dispute[]
+  reviewsReceived   Review[]      @relation("VendorReviews")
+  reviewsGiven      Review[]      @relation("ReviewsGiven")
+  withdrawals       Withdrawal[]
+  directReports     DirectReport[]
+  ticketsReceived   SupportTicket[]
+  ticketsGiven      SupportTicket[] @relation("TicketsGiven")
+  transactions      Transaction[]
+  notifications     Notification[]
+  chatMessages      ChatMessage[]
+  activityLogs      ActivityLog[]
+  vendorRequests    VendorRequest[]
+  emailLogs         EmailLog[]
+  usedCoupons       UsedCoupon[]
+
+  @@index([role])
+  @@index([vendorStatus])
+}
+
+model Listing {
+  id              String    @id @default(cuid())
+  title           String
+  platform        String
+  category        String    @default("")
+  description     String    @default("")
+  deliveryFormat  String    @default("email:pass")
+  countryRegister String    @default("")
+  originalMail    Boolean   @default(false)
+  country         String    @default("")
+  proxy           String    @default("")
+  visible         Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  vendorId        String?
+  vendor          User?     @relation(fields: [vendorId], references: [id])
+  products        Product[]
+  reviews         Review[]
+
+  @@index([platform])
+  @@index([category])
+  @@index([vendorId])
+}
+
+model Product {
+  id              String    @id @default(cuid())
+  title           String
+  description     String    @default("")
+  platform        String
+  category        String    @default("")
+  vendorPrice     Float     @default(0)
+  storePrice      Float     @default(0)
+  stock           Int       @default(0)
+  status          String    @default("pending")
+  visible         Boolean   @default(true)
+  accountsData    String    @default("")
+  deliveryFormat  String    @default("email:pass")
+  countryRegister String    @default("")
+  originalMail    Boolean   @default(false)
+  country         String    @default("")
+  proxy           String    @default("")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  listingId       String?
+  listing         Listing?  @relation(fields: [listingId], references: [id])
+  vendorId        String
+  vendor          User      @relation(fields: [vendorId], references: [id])
+  purchases       Purchase[]
+  reviews         Review[]
+
+  @@index([vendorId])
+  @@index([platform])
+  @@index([status])
+  @@index([listingId])
+  @@index([visible])
+}
+
+model Purchase {
+  id           String    @id @default(cuid())
+  quantity     Int       @default(1)
+  subtotal     Float
+  discount     Float     @default(0)
+  couponCode   String?
+  total        Float
+  accounts     String    @default("")
+  status       String    @default("completed")
+  createdAt    DateTime  @default(now())
+
+  buyerId      String
+  buyer        User      @relation(fields: [buyerId], references: [id])
+  productId    String
+  product      Product   @relation(fields: [productId], references: [id])
+
+  @@index([buyerId])
+  @@index([productId])
+}
+
+model Deposit {
+  id          String   @id @default(cuid())
+  amount      Float
+  method      String
+  status      String   @default("pending")
+  txId        String?
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Dispute {
+  id          String   @id @default(cuid())
+  reason      String
+  status      String   @default("open")
+  resolution  String?
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+
+  buyerId     String
+  buyer       User     @relation(fields: [buyerId], references: [id])
+  purchaseId  String?
+  vendorId    String?
+  productId   String?
+  orderId     String?
+
+  @@index([buyerId])
+  @@index([status])
+}
+
+model Withdrawal {
+  id           String   @id @default(cuid())
+  amount       Float
+  netAmount    Float
+  fee          Float
+  method       String
+  wallet       String
+  status       String   @default("pending")
+  rejectReason String?
+  createdAt    DateTime @default(now())
+  processedAt  DateTime?
+
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  rating    Int
+  comment   String   @default("")
+  createdAt DateTime @default(now())
+
+  buyerId   String
+  buyer     User     @relation("ReviewsGiven", fields: [buyerId], references: [id])
+  vendorId  String?
+  vendor    User?    @relation("VendorReviews", fields: [vendorId], references: [id])
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id])
+  listingId String?
+  listing   Listing? @relation(fields: [listingId], references: [id])
+
+  @@index([buyerId])
+  @@index([vendorId])
+  @@index([productId])
+}
+
+model DirectReport {
+  id         String   @id @default(cuid())
+  issueType  String
+  message    String
+  status     String   @default("open")
+  createdAt  DateTime @default(now())
+
+  buyerId    String
+  buyer      User     @relation(fields: [buyerId], references: [id])
+  purchaseId String?
+  vendorId   String?
+  productId  String?
+
+  @@index([buyerId])
+  @@index([status])
+}
+
+model SupportTicket {
+  id          String   @id @default(cuid())
+  subject     String
+  category    String
+  priority    String   @default("normal")
+  message     String
+  status      String   @default("open")
+  reply       String?
+  createdAt   DateTime @default(now())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  repliedById String?
+  repliedBy   User?    @relation("TicketsGiven", fields: [repliedById], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Coupon {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  type        String
+  value       Float
+  minOrder    Float     @default(0)
+  maxUses     Int       @default(-1)
+  usedCount   Int       @default(0)
+  expiresAt   DateTime?
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  usedCoupons UsedCoupon[]
+
+  @@index([active])
+}
+
+model UsedCoupon {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  couponId  String
+  coupon    Coupon   @relation(fields: [couponId], references: [id])
+
+  @@unique([userId, couponId])
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  type        String
+  amount      Float
+  description String   @default("")
+  createdAt   DateTime @default(now())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  type      String   @default("info")
+  link      String?
+  createdAt DateTime @default(now())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sender    String
+  message   String
+  createdAt DateTime @default(now())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  action      String
+  description String   @default("")
+  ip          String?
+  createdAt   DateTime @default(now())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model VendorRequest {
+  id             String   @id @default(cuid())
+  firstName      String
+  lastName       String
+  email          String
+  productDetails String
+  bulk           Boolean  @default(false)
+  status         String   @default("pending")
+  adminComments  String?
+  createdAt      DateTime @default(now())
+  reviewedAt     DateTime?
+
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+
+  @@index([status])
+}
+
+model Setting {
+  key   String @id
+  value String
+}
+
+model EmailLog {
+  id          String   @id @default(cuid())
+  toEmail     String
+  templateKey String
+  subject     String
+  body        String
+  status      String   @default("sent")
+  createdAt   DateTime @default(now())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([toEmail])
+  @@index([templateKey])
+}

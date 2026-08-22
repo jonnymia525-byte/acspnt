@@ -549,7 +549,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
               </div>
               {user && (
                 <div style={{ fontSize: 11, color: "#888", marginTop: 6 }}>
-                  Name: {user.firstName} {user.lastName} · Email: {user.email}
+                  Name: {user.name || user.username} · Email: {user.email}
                 </div>
               )}
             </div>
@@ -558,7 +558,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
                 style={{ flex: 1, padding: "8px 0", border: "1px solid #ddd", borderRadius: 4, background: "#fff", cursor: "pointer", fontSize: 13 }}>Cancel</button>
               <button className="btn btn-primary" style={{ flex: 1 }}
                 onClick={() => {
-                  const info = `User: ${user ? `${user.firstName} ${user.lastName} (${user.email})` : "Guest"}\nProduct: ${contactListing.title}\nPlatform: ${contactListing.platform}\nCategory: ${contactListing.category}\nMessage: ${contactMsg || "No message"}`;
+                  const info = `User: ${user ? `${user.name || user.username} (${user.email})` : "Guest"}\nProduct: ${contactListing.title}\nPlatform: ${contactListing.platform}\nCategory: ${contactListing.category}\nMessage: ${contactMsg || "No message"}`;
                   alert("Message sent to admin!\n\n" + info);
                   setContactListing(null); setContactMsg("");
                 }}>Send</button>

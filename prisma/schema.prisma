@@ -67,6 +67,7 @@ model Listing {
   country         String    @default("")
   proxy           String    @default("")
   visible         Boolean   @default(true)
+  bestSeller      Boolean   @default(false)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

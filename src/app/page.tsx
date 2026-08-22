@@ -20,6 +20,28 @@ export default async function HomePage() {
     }),
   ]);
 
+  // Get total sales per listing (purchase quantity through products)
+  const listingIds = listings.map(l => l.id);
+  const salesData = await prisma.purchase.groupBy({
+    by: ["productId"],
+    where: { product: { listingId: { in: listingIds } } },
+    _sum: { quantity: true },
+  });
+  // Map listingId -> total sales
+  const productSalesMap = new Map(salesData.map(s => [s.productId, s._sum.quantity ?? 0]));
+  // Get productId -> listingId mapping for listings we care about
+  const productListingMap = new Map<string, string>();
+  for (const l of listings) {
+    for (const p of l.products) {
+      productListingMap.set(p.id, l.id);
+    }
+  }
+  const listingSalesMap = new Map<string, number>();
+  for (const [prodId, qty] of productSalesMap) {
+    const lid = productListingMap.get(prodId);
+    if (lid) listingSalesMap.set(lid, (listingSalesMap.get(lid) || 0) + qty);
+  }
+
   const platformMap = new Map<string, typeof listings>();
   for (const l of listings) {
     if (l.products.length === 0) continue;
@@ -33,6 +55,21 @@ export default async function HomePage() {
     "gmail", "telegram", "x", "twitter", "tiktok", "linkedin",
     "discord", "reddit", "youtube", "pinterest", "snapchat",
   ];
+
+  // Auto-detect best seller per platform: listing with most total sales
+  // Admin can override by setting bestSeller=true on a listing
+  for (const [, items] of platformMap) {
+    const hasAdminPick = items.some(l => l.bestSeller);
+    if (!hasAdminPick && items.length > 0) {
+      let maxSales = 0;
+      let bestIdx = 0;
+      items.forEach((l, i) => {
+        const totalSales = listingSalesMap.get(l.id) || 0;
+        if (totalSales > maxSales) { maxSales = totalSales; bestIdx = i; }
+      });
+      items[bestIdx].bestSeller = true;
+    }
+  }
 
   const platforms = Array.from(platformMap.entries())
     .map(([platform, items]) => ({

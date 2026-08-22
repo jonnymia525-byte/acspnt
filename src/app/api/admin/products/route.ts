@@ -54,8 +54,8 @@ export async function GET(req: Request) {
       include: {
         vendor: { select: { id: true, username: true, name: true, email: true, vendorStatus: true, balance: true } },
         listing: { select: { id: true, title: true, platform: true } },
-        purchases: { select: { id: true, quantity: true, total: true, status: true, createdAt: true, buyer: { select: { username: true } } }, orderBy: { createdAt: "desc" }, take: 20 },
-        reviews: { select: { id: true, rating: true, comment: true, createdAt: true, buyer: { select: { username: true } } }, orderBy: { createdAt: "desc" }, take: 10 },
+        purchases: { select: { id: true, quantity: true, total: true, status: true, createdAt: true, buyer: { select: { id: true, username: true } } }, orderBy: { createdAt: "desc" }, take: 20 },
+        reviews: { select: { id: true, rating: true, comment: true, createdAt: true, buyer: { select: { id: true, username: true } } }, orderBy: { createdAt: "desc" }, take: 10 },
       },
     });
     if (!product) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -117,6 +117,45 @@ export async function POST(req: Request) {
       const updated = await prisma.product.update({ where: { id: productId }, data: updates });
       await prisma.activityLog.create({ data: { action: "product_edited", description: `Admin edited "${product.title}"`, userId: admin.id } });
       return NextResponse.json({ success: true, product: updated });
+    }
+
+    case "hold": {
+      const newStatus = product.status === "hold" ? "approved" : "hold";
+      await prisma.product.update({ where: { id: productId }, data: { status: newStatus, visible: newStatus === "approved" } });
+      await prisma.activityLog.create({ data: { action: newStatus === "hold" ? "product_held" : "product_unheld", description: `Admin ${newStatus === "hold" ? "held" : "unheld"} "${product.title}"`, userId: admin.id } });
+      if (newStatus === "hold") {
+        await prisma.notification.create({ data: { userId: product.vendorId, title: "Product On Hold", message: `Your product "${product.title}" has been placed on hold by admin.` } }).catch(() => {});
+      }
+      return NextResponse.json({ success: true, status: newStatus });
+    }
+
+    case "delete_account_line": {
+      // Delete a specific account line from accountsData
+      const lineIndex = parseInt(data.lineIndex);
+      if (isNaN(lineIndex)) return NextResponse.json({ error: "lineIndex required" }, { status: 400 });
+      const fullProduct = await prisma.product.findUnique({ where: { id: productId }, select: { accountsData: true } });
+      if (!fullProduct) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      const lines = fullProduct.accountsData.split(/\r?\n/).filter(Boolean);
+      if (lineIndex < 0 || lineIndex >= lines.length) return NextResponse.json({ error: "Invalid line index" }, { status: 400 });
+      lines.splice(lineIndex, 1);
+      await prisma.product.update({ where: { id: productId }, data: { accountsData: lines.join("\n"), stock: lines.length } });
+      await prisma.activityLog.create({ data: { action: "account_line_deleted", description: `Admin deleted account line ${lineIndex + 1} from "${product.title}"`, userId: admin.id } });
+      return NextResponse.json({ success: true, stock: lines.length });
+    }
+
+    case "edit_account_line": {
+      // Edit a specific account line
+      const lineIndex2 = parseInt(data.lineIndex);
+      const newLine = data.newLine;
+      if (isNaN(lineIndex2) || !newLine) return NextResponse.json({ error: "lineIndex and newLine required" }, { status: 400 });
+      const fullProduct2 = await prisma.product.findUnique({ where: { id: productId }, select: { accountsData: true } });
+      if (!fullProduct2) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      const lines2 = fullProduct2.accountsData.split(/\r?\n/).filter(Boolean);
+      if (lineIndex2 < 0 || lineIndex2 >= lines2.length) return NextResponse.json({ error: "Invalid line index" }, { status: 400 });
+      lines2[lineIndex2] = newLine.trim();
+      await prisma.product.update({ where: { id: productId }, data: { accountsData: lines2.join("\n") } });
+      await prisma.activityLog.create({ data: { action: "account_line_edited", description: `Admin edited account line ${lineIndex2 + 1} in "${product.title}"`, userId: admin.id } });
+      return NextResponse.json({ success: true });
     }
 
     default:

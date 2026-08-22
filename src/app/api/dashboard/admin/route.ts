@@ -44,7 +44,7 @@ export async function GET() {
     prisma.withdrawal.count({ where: { status: "pending" } }),
     prisma.dispute.count({ where: { status: "open" } }),
     prisma.purchase.findMany({
-      select: { id: true, total: true, createdAt: true, product: { select: { title: true } }, buyer: { select: { username: true } } },
+      select: { id: true, total: true, quantity: true, status: true, createdAt: true, product: { select: { title: true, platform: true, vendor: { select: { username: true } } } }, buyer: { select: { username: true } } },
       orderBy: { createdAt: "desc" },
       take: 10,
     }),

@@ -20,7 +20,7 @@ interface Product {
 interface Listing {
   id: string; title: string; platform: string; category: string;
   deliveryFormat: string; countryRegister: string; originalMail: boolean;
-  country: string; products: Product[];
+  country: string; products: Product[]; bestSeller?: boolean;
 }
 interface TrendingProduct extends Product {
   avgRating: number; ratingCount: number;
@@ -150,6 +150,16 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
   const [depAmount, setDepAmount] = useState("");
   const [depMethod, setDepMethod] = useState("crypto");
   const [depositing, setDepositing] = useState(false);
+  const [expandedPlatforms, setExpandedPlatforms] = useState<Record<string, boolean>>({});
+  const [detailListing, setDetailListing] = useState<Listing | null>(null);
+  const [contactListing, setContactListing] = useState<Listing | null>(null);
+  const [contactMsg, setContactMsg] = useState("");
+  // Admin inline edit
+  const [editListing, setEditListing] = useState<Listing | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [editStock, setEditStock] = useState("");
   const catRef = useRef<HTMLDivElement>(null);
   const langRef = useRef<HTMLDivElement>(null);
 
@@ -213,7 +223,6 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
       <div className="navbar">
         <Link href="/?page=support" className="nav-newticket">New ticket / Ask a question</Link>
         <Link href="/" className="nav-home">Home</Link>
-        <div className="nav-dropdown">Useful information ▾</div>
         <Link href="/?page=faq">FAQ</Link>
         <Link href="/?page=rules">Terms of use</Link>
         {!user && <Link href="/?page=seller-register" className="nav-seller">Become a seller</Link>}
@@ -276,24 +285,34 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
       )}
 
       {/* PRODUCT LISTINGS */}
-      {filtered.map(pg => (
-        <div key={pg.platform} className="platform-section">
-          <div className="platform-header">
-            <div style={{ width: 32, flexShrink: 0 }}></div>
-            <span style={{ flex: 1 }}>{pg.label} Accounts</span>
-            <div style={{ width: 76, flexShrink: 0 }}></div>
-            <span className="stock-col">In stock <span className="sort-icon">↕</span></span>
-            <span className="unit-col">Price per pc</span>
-            <span className="price-col">Price <span className="sort-icon">↕</span></span>
-            <div style={{ width: 72, flexShrink: 0, textAlign: "center" }}></div>
-          </div>
+      {filtered.map(pg => {
+        const allRows: { listing: Listing; product: Product }[] = [];
+        pg.listings.forEach(listing => listing.products.forEach(product => allRows.push({ listing, product })));
+        const expanded = expandedPlatforms[pg.platform];
+        const visibleRows = expanded ? allRows : allRows.slice(0, 3);
+        const hasMore = allRows.length > 3;
+        const totalStock = allRows.reduce((s, r) => s + r.product.stock, 0);
 
-          {pg.listings.map(listing =>
-            listing.products.map(product => (
-              <div key={product.id} className="product-row" onClick={() => setBuyListing(listing)}>
+        return (
+          <div key={pg.platform} className="platform-section">
+            <div className="platform-header">
+              <div style={{ width: 28, flexShrink: 0 }}></div>
+              <span style={{ flex: 1, fontSize: 12 }}>{pg.label} Accounts</span>
+              <span className="stock-col" style={{ fontSize: 11, fontWeight: 600, color: "#E6E6E6" }}>Stock</span>
+              <span className="unit-col" style={{ fontSize: 10 }}>Pcs</span>
+              <span className="price-col" style={{ fontSize: 11, fontWeight: 600, color: "#E6E6E6" }}>Price Pcs</span>
+              <div style={{ width: 56, flexShrink: 0, textAlign: "center" }}></div>
+            </div>
+
+            {visibleRows.map(({ listing, product }) => (
+              <div key={product.id} className="product-row">
                 <ProductIcon platform={product.platform} />
                 <div className="product-info">
-                  <div className="product-title">{listing.title}</div>
+                  <div className="product-title"
+                    onClick={(e) => { e.stopPropagation(); setDetailListing(listing); }}
+                    style={{ cursor: "pointer" }}>
+                    {listing.title}
+                  </div>
                   <div className="product-desc">
                     {listing.category && `${categoryLabel(listing.category)} · `}
                     {listing.countryRegister && listing.countryRegister !== "Global" ? `${listing.countryRegister} · ` : ""}
@@ -304,28 +323,46 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
                 <div className="product-tags">
                   <span className="tag tag-warranty">48h</span>
                   {listing.category === "fresh" && <span className="tag tag-new">NEW</span>}
-                  {listing.category === "verified" && <span className="tag tag-star">★ {product.vendor.vendorStatus === "approved" ? "Verified" : ""}</span>}
+                  {listing.category === "verified" && <span className="tag tag-star">★ Verified</span>}
                   {listing.category === "aged" && <span className="tag tag-star">★ Aged</span>}
-                  {product.stock > 10000 && <span className="tag tag-discount">10k+</span>}
-                  {product.stock > 1000 && product.stock <= 10000 && <span className="tag tag-discount">1k+</span>}
+                  {listing.bestSeller && <span className="tag tag-bestseller">🔥 Best Seller</span>}
                 </div>
-                <div className="stock-col"><strong>{product.stock.toLocaleString()}</strong> pcs.</div>
-                <div className="unit-col">Price per pc</div>
-                <div className="price-col">from {money(product.storePrice)}</div>
-                <button className="buy-btn" disabled={product.stock === 0}
-                  onClick={e => { e.stopPropagation(); setBuyListing(listing); }}>
-                  <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
-                  Buy
-                </button>
+                <div className="stock-col"><strong>{product.stock.toLocaleString()}</strong></div>
+                <div className="unit-col">per pc</div>
+                <div className="price-col"><span className="price-from">from </span>{money(product.storePrice)}</div>
+                {user?.role === 'admin' ? (
+                  <button className="buy-btn" style={{ background: '#1976d2' }}
+                    onClick={e => { e.stopPropagation(); setEditListing(listing); setEditTitle(listing.title); setEditDesc(listing.deliveryFormat || ''); setEditPrice(String(product.storePrice)); setEditStock(String(product.stock)); }}>
+                    Edit
+                  </button>
+                ) : product.stock > 0 ? (
+                  <button className="buy-btn"
+                    onClick={e => { e.stopPropagation(); setBuyListing(listing); }}>
+                    <svg viewBox="0 0 24 24" style={{ width: 12, height: 12, fill: "#fff" }}><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                    Buy
+                  </button>
+                ) : (
+                  <button className="buy-btn" style={{ background: "#888" }}
+                    onClick={e => { e.stopPropagation(); setContactListing(listing); }}>
+                    Contact
+                  </button>
+                )}
               </div>
-            ))
-          )}
+            ))}
 
-          {pg.listings.length === 0 && (
-            <div className="product-row" style={{ justifyContent: "center", color: "#888" }}>No listings</div>
-          )}
-        </div>
-      ))}
+            {hasMore && !expanded && (
+              <div className="expand-btn"
+                onClick={() => setExpandedPlatforms(prev => ({ ...prev, [pg.platform]: true }))}>
+                + Show {allRows.length - 3} more ({allRows.length} total)
+              </div>
+            )}
+
+            {pg.listings.length === 0 && (
+              <div className="product-row" style={{ justifyContent: "center", color: "#888" }}>No listings</div>
+            )}
+          </div>
+        );
+      })}
 
       {/* NO RESULTS */}
       {filtered.length === 0 && (
@@ -335,23 +372,46 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
       {/* FOOTER */}
       <footer className="footer">
         <div className="footer-inner">
-          <div className="footer-col">
-            <h4>Marketplace</h4>
-            <Link href="/">Home</Link>
-            <Link href="/?page=faq">FAQ</Link>
-            <Link href="/?page=rules">Rules</Link>
+          <div className="footer-left">
+            <div className="footer-col">
+              <h4>Marketplace</h4>
+              <Link href="/">Home</Link>
+              <Link href="/?page=faq">FAQ</Link>
+              <Link href="/?page=rules">Rules</Link>
+            </div>
+            <div className="footer-col">
+              <h4>Account</h4>
+              <Link href="/?page=login">Login</Link>
+              <Link href="/?page=register">Sign Up</Link>
+              <Link href="/?page=seller-register">Become a seller</Link>
+            </div>
           </div>
-          <div className="footer-col">
-            <h4>Platforms</h4>
-            <a href="#">Instagram</a>
-            <a href="#">Facebook</a>
-            <a href="#">TikTok</a>
-          </div>
-          <div className="footer-col">
-            <h4>Account</h4>
-            <Link href="/?page=login">Login</Link>
-            <Link href="/?page=register">Sign Up</Link>
-            <Link href="/?page=seller-register">Become a seller</Link>
+          <div className="footer-col footer-contact">
+            <h4>Contact Us</h4>
+            <a href="/?page=support" className="footer-contact-link">
+              <span className="footer-contact-icon" style={{ background: '#5fa830' }}>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+              </span>
+              <span>Direct Message</span>
+            </a>
+            <a href="https://t.me/accspoint" target="_blank" rel="noopener noreferrer" className="footer-contact-link">
+              <span className="footer-contact-icon" style={{ background: '#0088CC' }}>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="white"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.492-1.302.48-.428-.013-1.252-.242-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+              </span>
+              <span>Telegram</span>
+            </a>
+            <a href="https://facebook.com/accspoint" target="_blank" rel="noopener noreferrer" className="footer-contact-link">
+              <span className="footer-contact-icon" style={{ background: '#1877F2' }}>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="white"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+              </span>
+              <span>Facebook</span>
+            </a>
+            <a href="https://wa.me/1234567890" target="_blank" rel="noopener noreferrer" className="footer-contact-link">
+              <span className="footer-contact-icon" style={{ background: '#25D366' }}>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+              </span>
+              <span>WhatsApp</span>
+            </a>
           </div>
         </div>
         <div className="footer-bottom">
@@ -360,6 +420,152 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
       </footer>
 
       {buyListing && <BuyModal listing={buyListing} user={user} onClose={() => setBuyListing(null)} />}
+
+      {/* ADMIN EDIT MODAL */}
+      {editListing && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setEditListing(null)}>
+          <div style={{ background: "#fff", borderRadius: 6, width: 440, maxWidth: "90vw" }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", fontWeight: 600 }}>Edit: {editListing.title}</div>
+            <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div><label style={{ display: "block", fontSize: 12, marginBottom: 4, color: "#666" }}>Title</label><input type="text" value={editTitle} onChange={e => setEditTitle(e.target.value)} style={{ width: "100%", padding: "6px 8px", border: "1px solid #ddd", borderRadius: 4, fontSize: 13 }} /></div>
+              <div><label style={{ display: "block", fontSize: 12, marginBottom: 4, color: "#666" }}>Description</label><textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} style={{ width: "100%", padding: "6px 8px", border: "1px solid #ddd", borderRadius: 4, fontSize: 13 }} rows={3} /></div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ flex: 1 }}><label style={{ display: "block", fontSize: 12, marginBottom: 4, color: "#666" }}>Price ($)</label><input type="number" step="0.01" value={editPrice} onChange={e => setEditPrice(e.target.value)} style={{ width: "100%", padding: "6px 8px", border: "1px solid #ddd", borderRadius: 4, fontSize: 13 }} /></div>
+                <div style={{ flex: 1 }}><label style={{ display: "block", fontSize: 12, marginBottom: 4, color: "#666" }}>Stock</label><input type="number" value={editStock} onChange={e => setEditStock(e.target.value)} style={{ width: "100%", padding: "6px 8px", border: "1px solid #ddd", borderRadius: 4, fontSize: 13 }} /></div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={{ flex: 1, padding: "8px 0", border: "1px solid #ddd", borderRadius: 4, background: "#f5f5f5", cursor: "pointer", fontSize: 13 }} onClick={() => setEditListing(null)}>Cancel</button>
+                <button style={{ flex: 1, padding: "8px 0", border: "none", borderRadius: 4, background: "#3ea136", color: "#fff", fontWeight: 600, cursor: "pointer", fontSize: 13 }} onClick={async () => {
+                  try {
+                    const res = await fetch("/api/admin/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "edit", productId: editListing.products?.[0]?.id, title: editTitle, description: editDesc, vendorPrice: editPrice, stock: editStock }) });
+                    const r = await res.json();
+                    if (r.success) { alert("Saved!"); setEditListing(null); location.reload(); } else alert(r.error || "Failed");
+                  } catch { alert("Error saving"); }
+                }}>Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRODUCT DETAIL OVERLAY */}
+      {detailListing && (
+        <div className="detail-overlay">
+          <div className="detail-topbar">
+            <button onClick={() => setDetailListing(null)} style={{ background: "none", border: "none", color: "#fff", fontSize: 18, cursor: "pointer" }}>&larr;</button>
+            <span>{detailListing.title}</span>
+            <div style={{ width: 24 }}></div>
+          </div>
+          <div className="detail-body">
+            {/* Platform badge */}
+            <div className="detail-platform" style={{ background: platformColor(detailListing.platform) }}>
+              {detailListing.platform.charAt(0).toUpperCase() + detailListing.platform.slice(1)}
+            </div>
+            {/* Title */}
+            <div className="detail-title">{detailListing.title}</div>
+            {/* Tags */}
+            <div className="detail-tags">
+              {detailListing.category && <span className="detail-tag" style={{ background: "#e8f5e9", color: "#2e7d32" }}>{categoryLabel(detailListing.category)}</span>}
+              {detailListing.countryRegister && detailListing.countryRegister !== "Global" && <span className="detail-tag">{detailListing.countryRegister}</span>}
+              {detailListing.originalMail && <span className="detail-tag">Email included</span>}
+              {detailListing.deliveryFormat && <span className="detail-tag">{detailListing.deliveryFormat}</span>}
+              <span className="detail-tag" style={{ background: "#e8f5e9", color: "#2e7d32" }}>48h warranty</span>
+            </div>
+            {/* Meta */}
+            <div className="detail-meta">
+              <span>Platform: {detailListing.platform.charAt(0).toUpperCase() + detailListing.platform.slice(1)}</span>
+              <span>Country: {detailListing.countryRegister || "Global"}</span>
+              <span>Email: {detailListing.originalMail ? "Included" : "Not included"}</span>
+            </div>
+            {/* Vendor selection */}
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8, color: "#333" }}>Select Vendor</div>
+            <div className="detail-vendors">
+              {detailListing.products
+                .filter(p => p.status === "approved" && p.stock > 0)
+                .sort((a, b) => a.storePrice - b.storePrice)
+                .map(p => (
+                  <div key={p.id} className="detail-vendor-card"
+                    onClick={() => { setDetailListing(null); setBuyListing(detailListing); }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{p.vendor.username}</div>
+                      <div style={{ fontSize: 11, color: "#888" }}>{p.stock} in stock
+                        {p.vendor.vendorCountry && p.vendor.vendorCountry !== "Global" && ` · ${p.vendor.vendorCountry}`}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#3ea136" }}>{money(p.storePrice)}</div>
+                      <div style={{ fontSize: 10, color: "#888" }}>per account</div>
+                    </div>
+                  </div>
+                ))}
+              {detailListing.products.filter(p => p.status === "approved" && p.stock > 0).length === 0 && (
+                <div style={{ padding: 20, textAlign: "center", color: "#888", fontSize: 13 }}>
+                  No vendors currently have stock.
+                  <button className="buy-btn" style={{ background: "#888", marginTop: 8, marginInline: "auto" }}
+                    onClick={() => { setDetailListing(null); setContactListing(detailListing); }}>
+                    Contact Admin
+                  </button>
+                </div>
+              )}
+            </div>
+            {/* Direct Buy */}
+            {detailListing.products.some(p => p.status === "approved" && p.stock > 0) && (
+              <button className="btn btn-primary" style={{ width: "100%", padding: "12px 0", fontSize: 14 }}
+                onClick={() => { setDetailListing(null); setBuyListing(detailListing); }}>
+                <svg viewBox="0 0 24 24" style={{ width: 14, height: 14, fill: "#fff" }}><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                Buy Now
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* CONTACT MODAL (stock=0) */}
+      {contactListing && (
+        <div className="modal-bg" onClick={() => { setContactListing(null); setContactMsg(""); }}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <span style={{ fontWeight: 600 }}>Contact Admin</span>
+              <button onClick={() => { setContactListing(null); setContactMsg(""); }} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#888" }}>x</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ padding: 10, background: "#f9f9f9", borderRadius: 6, marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{contactListing.title}</div>
+                <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                  Platform: {contactListing.platform} · Category: {contactListing.category} · Country: {contactListing.countryRegister || "Global"}
+                </div>
+                <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                  Status: <span style={{ color: "#d32f2f" }}>Out of Stock</span>
+                </div>
+              </div>
+              <div style={{ padding: 10, background: "#fff3e0", borderRadius: 6, marginBottom: 12, fontSize: 11, color: "#e65100" }}>
+                This product is currently out of stock. Send a message to the admin to request a restock.
+              </div>
+              <div>
+                <label className="label">Your Message</label>
+                <textarea className="input" rows={3} value={contactMsg}
+                  onChange={e => setContactMsg(e.target.value)}
+                  placeholder={`Hi, I'm interested in ${contactListing.title}. Please restock this product.`} />
+              </div>
+              {user && (
+                <div style={{ fontSize: 11, color: "#888", marginTop: 6 }}>
+                  Name: {user.firstName} {user.lastName} · Email: {user.email}
+                </div>
+              )}
+            </div>
+            <div className="modal-foot" style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { setContactListing(null); setContactMsg(""); }}
+                style={{ flex: 1, padding: "8px 0", border: "1px solid #ddd", borderRadius: 4, background: "#fff", cursor: "pointer", fontSize: 13 }}>Cancel</button>
+              <button className="btn btn-primary" style={{ flex: 1 }}
+                onClick={() => {
+                  const info = `User: ${user ? `${user.firstName} ${user.lastName} (${user.email})` : "Guest"}\nProduct: ${contactListing.title}\nPlatform: ${contactListing.platform}\nCategory: ${contactListing.category}\nMessage: ${contactMsg || "No message"}`;
+                  alert("Message sent to admin!\n\n" + info);
+                  setContactListing(null); setContactMsg("");
+                }}>Send</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showDeposit && user && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setShowDeposit(false)}>

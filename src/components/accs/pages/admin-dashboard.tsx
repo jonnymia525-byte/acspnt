@@ -19,14 +19,14 @@ interface Product {
   country: string; createdAt: string; accountsData?: string;
   vendor: { id: string; username: string; name: string; vendorStatus: string };
   isDuplicate?: boolean;
-  purchases?: Array<{ id: string; quantity: number; total: number; status: string; createdAt: string; buyer: { username: string } }>;
-  reviews?: Array<{ id: string; rating: number; comment: string; createdAt: string; buyer: { username: string } }>;
+  purchases?: Array<{ id: string; quantity: number; total: number; status: string; createdAt: string; buyer: { id: string; username: string } }>;
+  reviews?: Array<{ id: string; rating: number; comment: string; createdAt: string; buyer: { id: string; username: string } }>;
 }
 
 interface Order {
   id: string; total: number; quantity: number; status: string; createdAt: string;
-  product: { title: string; platform: string; vendor: { username: string } };
-  buyer: { username: string };
+  product: { title: string; platform: string; vendor?: { username: string } };
+  buyer?: { username: string };
 }
 
 interface Withdrawal {
@@ -52,6 +52,114 @@ interface UserDetail extends User {
 }
 
 const TABS = ["overview", "users", "vendors", "products", "orders", "withdrawals", "coupons", "deposits", "notices", "activity", "sales"];
+
+interface ListingItem {
+  id: string; title: string; platform: string; category: string;
+  bestSeller: boolean; visible: boolean; createdAt: string;
+  totalSales: number; totalStock: number;
+  products: Array<{ id: string; stock: number; storePrice: number; status: string }>;
+}
+
+function BestSellerManager({ loadAll }: { loadAll: () => void }) {
+  const [listings, setListings] = useState<ListingItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [platformFilter, setPlatformFilter] = useState<string>("");
+
+  const fetchListings = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/listings");
+      const d = await res.json();
+      setListings(d.listings || []);
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchListings(); }, []);
+
+  const toggleBestSeller = async (listingId: string) => {
+    try {
+      const res = await fetch("/api/admin/listings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "toggle_best_seller", listingId }),
+      });
+      const r = await res.json();
+      if (r.success) {
+        setListings(prev => prev.map(l => {
+          if (l.id === listingId) return { ...l, bestSeller: r.bestSeller };
+          if (r.bestSeller && l.platform === listings.find(x => x.id === listingId)?.platform) {
+            return { ...l, bestSeller: false };
+          }
+          return l;
+        }));
+        loadAll();
+      } else alert(r.error);
+    } catch {}
+  };
+
+  const platforms = [...new Set(listings.map(l => l.platform))].sort();
+  const filtered = platformFilter ? listings.filter(l => l.platform === platformFilter) : listings;
+  const bestSellerCount = listings.filter(l => l.bestSeller).length;
+
+  if (loading) return <div style={{ padding: 12, fontSize: 12, color: "#888" }}>Loading listings...</div>;
+
+  return (
+    <div className="panel" style={{ marginBottom: 12 }}>
+      <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>Best Seller Management ({bestSellerCount} active)</span>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <select value={platformFilter} onChange={e => setPlatformFilter(e.target.value)} style={{ padding: "3px 6px", fontSize: 11, borderRadius: 3, border: "1px solid #555", background: "#333", color: "#fff" }}>
+            <option value="">All Platforms</option>
+            {platforms.map(p => <option key={p} value={p}>{platformLabel(p)}</option>)}
+          </select>
+          <button onClick={fetchListings} style={{ padding: "3px 8px", fontSize: 11, borderRadius: 3, border: "1px solid #555", background: "#444", color: "#fff", cursor: "pointer" }}>Refresh</button>
+        </div>
+      </div>
+      {filtered.length === 0 ? (
+        <div style={{ padding: 16, color: "#888", fontSize: 12, textAlign: "center" }}>No listings found</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Listing</th>
+                <th>Platform</th>
+                <th>Sales</th>
+                <th>Stock</th>
+                <th>Best Seller</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(l => (
+                <tr key={l.id}>
+                  <td style={{ fontWeight: 600, fontSize: 12 }}>{l.title}</td>
+                  <td style={{ fontSize: 12 }}>{platformLabel(l.platform)}</td>
+                  <td style={{ fontSize: 12 }}>{l.totalSales} units</td>
+                  <td style={{ fontSize: 12 }}>{l.totalStock}</td>
+                  <td>
+                    <button
+                      onClick={() => toggleBestSeller(l.id)}
+                      style={{
+                        padding: "3px 10px", fontSize: 11, fontWeight: 600, borderRadius: 3,
+                        border: l.bestSeller ? "none" : "1px solid #555",
+                        background: l.bestSeller ? "#ff9800" : "transparent",
+                        color: l.bestSeller ? "#fff" : "#aaa",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {l.bestSeller ? "🔥 Best Seller" : "Set Best Seller"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function AdminDashboard() {
   const [tab, setTab] = useState("overview");
@@ -105,6 +213,15 @@ export function AdminDashboard() {
   const [epDesc, setEpDesc] = useState("");
   const [epPrice, setEpPrice] = useState("");
   const [epStock, setEpStock] = useState("");
+
+  // Products grouped view
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+  const [groupView, setGroupView] = useState<Record<string, 'details' | 'vendors' | 'list'>>({});
+  const [groupDetail, setGroupDetail] = useState<Record<string, any>>({});
+  const [holdProduct, setHoldProduct] = useState<Product | null>(null);
+  const [editingLine, setEditingLine] = useState<{ productId: string; lineIndex: number } | null>(null);
+  const [editingLineText, setEditingLineEdit] = useState("");
+  const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set());
 
   // Coupon form
   const [couponCode, setCouponCode] = useState("");
@@ -161,9 +278,14 @@ export function AdminDashboard() {
 
   useEffect(() => { loadAll(); }, []);
 
-  // Filter helpers
+  // Filter helpers — users tab shows only buyers, vendors tab shows only sellers
   const filteredUsers = users.filter(u =>
-    !search || u.username.toLowerCase().includes(search.toLowerCase()) || u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase())
+    u.role !== "admin" && u.role !== "vendor" &&
+    (!search || u.username.toLowerCase().includes(search.toLowerCase()) || u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
+  );
+  const filteredVendors = users.filter(u =>
+    (u.role === "vendor" || u.vendorStatus === "approved" || u.vendorStatus === "pending") &&
+    (!search || u.username.toLowerCase().includes(search.toLowerCase()) || u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
   );
 
   const filteredProducts = products.filter(p =>
@@ -262,15 +384,15 @@ export function AdminDashboard() {
               <>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 16 }}>
                   {stats && [
-                    { l: "Users", v: stats.totalUsers, c: "#333" },
-                    { l: "Vendors", v: stats.totalVendors, c: "#333" },
-                    { l: "Products", v: stats.totalProducts, c: "#333" },
-                    { l: "Live", v: stats.approvedProducts, c: "#3ea136" },
-                    { l: "Pending", v: stats.pendingProducts, c: "#eab308" },
-                    { l: "Orders", v: stats.totalPurchases, c: "#333" },
-                    { l: "Revenue", v: money(stats.totalRevenue), c: "#3ea136" },
-                    { l: "Open Disputes", v: stats.openDisputes, c: stats.openDisputes > 0 ? "#e53e3e" : "#333" },
-                  ].map(s => <div key={s.l} className="stat"><div className="num" style={{ color: s.c }}>{s.v}</div><div className="lbl">{s.l}</div></div>)}
+                    { l: "Users", v: stats.totalUsers, c: "#333", tab: "users" },
+                    { l: "Vendors", v: stats.totalVendors, c: "#333", tab: "vendors" },
+                    { l: "Products", v: stats.totalProducts, c: "#333", tab: "products" },
+                    { l: "Live", v: stats.approvedProducts, c: "#3ea136", tab: "products" },
+                    { l: "Pending", v: stats.pendingProducts, c: "#eab308", tab: "products" },
+                    { l: "Orders", v: stats.totalPurchases, c: "#333", tab: "orders" },
+                    { l: "Revenue", v: money(stats.totalRevenue), c: "#3ea136", tab: "sales" },
+                    { l: "Open Disputes", v: stats.openDisputes, c: stats.openDisputes > 0 ? "#e53e3e" : "#333", tab: null },
+                  ].map(s => <div key={s.l} className="stat" style={{ cursor: s.tab ? "pointer" : "default" }} onClick={() => s.tab && setTab(s.tab)}><div className="num" style={{ color: s.c }}>{s.v}</div><div className="lbl">{s.l}</div></div>)}
                 </div>
                 <div className="panel" style={{ marginBottom: 16 }}>
                   <div className="panel-head">Recent Activity</div>
@@ -425,8 +547,8 @@ export function AdminDashboard() {
                   }
                 </div>
                 <div className="panel" style={{ marginTop: 12 }}>
-                  <div className="panel-head">All Vendors</div>
-                  {users.filter(u => u.role === "vendor").map(u => (
+                  <div className="panel-head">All Vendors ({filteredVendors.length})</div>
+                  {filteredVendors.map(u => (
                     <div key={u.id} className="row" style={{ cursor: "pointer" }} onClick={() => loadUserDetail(u.id)}>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600 }}>{u.name || u.username}</div>
@@ -448,39 +570,301 @@ export function AdminDashboard() {
                     <option value="all">All Status</option>
                     <option value="pending">Pending</option>
                     <option value="approved">Approved</option>
+                    <option value="hold">Hold</option>
                     <option value="rejected">Rejected</option>
                   </select>
                   <input type="text" placeholder="Search products..." value={search} onChange={e => setSearch(e.target.value)} className="input" style={{ flex: 1 }} />
                   <span style={{ fontSize: 12, color: "#888" }}>{filteredProducts.length} products</span>
                 </div>
-                <div className="panel">
-                  <div className="panel-head">Products ({filteredProducts.length})</div>
-                  <div style={{ overflowX: "auto" }}>
-                    <table className="tbl">
-                      <thead><tr><th>Product</th><th>Platform</th><th>Vendor</th><th>Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
-                      <tbody>
-                        {filteredProducts.filter(p => !search || p.title.toLowerCase().includes(search.toLowerCase()) || p.vendor.username.toLowerCase().includes(search.toLowerCase())).map(p => (
-                          <tr key={p.id} style={{ cursor: "pointer" }} onClick={() => loadProductDetail(p.id)}>
-                            <td style={{ fontWeight: 600 }}>{p.title} {p.isDuplicate && <span style={{ color: "#e53e3e", fontSize: 10 }}>[DUPE]</span>}</td>
-                            <td>{platformLabel(p.platform)}</td>
-                            <td style={{ fontSize: 12 }}>{p.vendor.username}</td>
-                            <td>{money(p.storePrice)}</td>
-                            <td>{p.stock}</td>
-                            <td><span className={`badge badge-${p.status}`}>{p.status}</span></td>
-                            <td onClick={e => e.stopPropagation()}>
-                              <div style={{ display: "flex", gap: 4 }}>
-                                {p.status === "pending" && <button className="btn btn-primary btn-sm" onClick={() => doProductAction("approve", p.id)}>Approve</button>}
-                                {p.status === "pending" && <button className="btn btn-danger btn-sm" onClick={() => { setRejectProduct(p); setRejectReason(""); }}>Reject</button>}
-                                <button className="btn btn-secondary btn-sm" onClick={() => { setEditProduct(p); setEpTitle(p.title); setEpDesc(p.description); setEpPrice(String(p.vendorPrice)); setEpStock(String(p.stock)); }}>Edit</button>
-                                <button className="btn btn-danger btn-sm" onClick={() => { if (confirm(`Delete "${p.title}"?`)) doProductAction("delete", p.id); }}>Del</button>
+                <BestSellerManager loadAll={loadAll} />
+
+                {/* Group products by title */}
+                {(() => {
+                  const searched = filteredProducts.filter(p => !search || p.title.toLowerCase().includes(search.toLowerCase()) || p.vendor.username.toLowerCase().includes(search.toLowerCase()));
+                  const groups = new Map<string, typeof products>();
+                  for (const p of searched) {
+                    const key = p.title;
+                    if (!groups.has(key)) groups.set(key, []);
+                    groups.get(key)!.push(p);
+                  }
+                  return Array.from(groups.entries()).map(([title, groupProducts]) => {
+                    const totalStock = groupProducts.reduce((s, p) => s + p.stock, 0);
+                    const totalValue = groupProducts.reduce((s, p) => s + p.storePrice * p.stock, 0);
+                    const vendors = [...new Map(groupProducts.map(p => [p.vendor.id, p.vendor])).values()];
+                    const isExpanded = expandedGroup === title;
+                    const view = groupView[title] || 'list';
+                    // Status counts
+                    const statusCounts = groupProducts.reduce((acc, p) => { acc[p.status] = (acc[p.status] || 0) + 1; return acc; }, {} as Record<string, number>);
+
+                    // Bulk download helpers
+                    const downloadText = (content: string, filename: string) => {
+                      const blob = new Blob([content], { type: 'text/plain' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url; a.download = filename; a.click();
+                      URL.revokeObjectURL(url);
+                    };
+                    const extractField = (accountsData: string, fieldIndex: number): string => {
+                      return accountsData.split(/\r?\n/).filter(Boolean).map(line => {
+                        const parts = line.split(':');
+                        return parts[fieldIndex] || '';
+                      }).filter(Boolean).join('\n');
+                    };
+                    const format = (groupProducts[0]?.deliveryFormat || 'email:pass').toLowerCase();
+                    const fmtParts = format.split(':');
+                    const usernameIdx = fmtParts.findIndex((f: string) => f === 'user' || f === 'username' || f === 'usr');
+                    const passIdx = fmtParts.findIndex((f: string) => f === 'pass' || f === 'password' || f === 'pwd');
+                    const emailIdx = fmtParts.findIndex((f: string) => f === 'mail' || f === 'email');
+                    const emailPassIdx = fmtParts.findIndex((f: string) => f === 'mailpass' || f === 'mailpass' || f === 'mailpass');
+                    // For mailpass, also check if 'mail' is followed by 'pass' as separate fields
+                    const mailPassCombined = fmtParts.findIndex((f: string) => f === 'mailpass');
+
+                    const getAllAccounts = () => groupProducts.map(p => (p.accountsData || '').split(/\r?\n/).filter(Boolean)).flat();
+                    const allAccountsCount = getAllAccounts().length;
+
+                    const panelStyle: React.CSSProperties = { marginBottom: 12, border: isExpanded ? '2px solid #3ea136' : undefined };
+
+                    return (
+                      <div key={title} className="panel" style={panelStyle}>
+                        {/* Header */}
+                        <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 700, fontSize: 14 }}>{title}</span>
+                            <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 3, background: '#eee', color: '#666' }}>{platformLabel(groupProducts[0].platform)}</span>
+                            {Object.entries(statusCounts).map(([st, count]) => (
+                              <span key={st} className={`badge badge-${st}`} style={{ fontSize: 10 }}>{st}: {count}</span>
+                            ))}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#888' }}>
+                            <span>{vendors.length} vendor{vendors.length !== 1 ? 's' : ''}</span>
+                            <span>·</span>
+                            <span>{totalStock} stock</span>
+                            <span>·</span>
+                            <span style={{ fontWeight: 600, color: '#3ea136' }}>{money(totalValue)}</span>
+                          </div>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div style={{ padding: '8px 16px', display: 'flex', gap: 6, flexWrap: 'wrap', borderBottom: isExpanded ? '1px solid #eee' : undefined }}>
+                          <button
+                            onClick={() => {
+                              const next = isExpanded && view === 'details' ? null : title;
+                              setExpandedGroup(next);
+                              if (next) setGroupView(v => ({ ...v, [title]: 'details' }));
+                            }}
+                            className={`btn btn-sm ${isExpanded && view === 'details' ? 'btn-primary' : 'btn-secondary'}`}
+                          >📋 Details</button>
+                          <button
+                            onClick={() => {
+                              const next = isExpanded && view === 'vendors' ? null : title;
+                              setExpandedGroup(next);
+                              if (next) setGroupView(v => ({ ...v, [title]: 'vendors' }));
+                            }}
+                            className={`btn btn-sm ${isExpanded && view === 'vendors' ? 'btn-primary' : 'btn-secondary'}`}
+                          >👤 Vendors ({vendors.length})</button>
+                          <button
+                            onClick={() => {
+                              const next = isExpanded && view === 'list' ? null : title;
+                              setExpandedGroup(next);
+                              if (next) setGroupView(v => ({ ...v, [title]: 'list' }));
+                            }}
+                            className={`btn btn-sm ${isExpanded && view === 'list' ? 'btn-primary' : 'btn-secondary'}`}
+                          >📦 Product List ({groupProducts.length})</button>
+                          {/* Quick actions on the group */}
+                          {groupProducts.some(p => p.status === 'pending') && (
+                            <button className="btn btn-sm btn-primary" onClick={() => {
+                              if (confirm(`Approve all ${groupProducts.filter(p => p.status === 'pending').length} pending products in "${title}"?`)) {
+                                groupProducts.filter(p => p.status === 'pending').forEach(p => doProductAction('approve', p.id));
+                              }
+                            }}>✅ Approve All Pending</button>
+                          )}
+                        </div>
+
+                        {/* Expanded content */}
+                        {isExpanded && view === 'details' && (
+                          <div style={{ padding: 16 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+                              <div><div style={{ fontSize: 11, color: '#888' }}>Platform</div><div style={{ fontWeight: 600 }}>{platformLabel(groupProducts[0].platform)}</div></div>
+                              <div><div style={{ fontSize: 11, color: '#888' }}>Category</div><div style={{ fontWeight: 600 }}>{groupProducts[0].category || '—'}</div></div>
+                              <div><div style={{ fontSize: 11, color: '#888' }}>Description</div><div style={{ fontSize: 12 }}>{groupProducts[0].description || 'No description'}</div></div>
+                              <div><div style={{ fontSize: 11, color: '#888' }}>Delivery Format</div><div style={{ fontWeight: 600, fontFamily: 'monospace', fontSize: 12 }}>{groupProducts[0].deliveryFormat}</div></div>
+                              <div><div style={{ fontSize: 11, color: '#888' }}>Price Range</div><div style={{ fontWeight: 600, color: '#3ea136' }}>{money(Math.min(...groupProducts.map(p => p.storePrice)))} — {money(Math.max(...groupProducts.map(p => p.storePrice)))}</div></div>
+                              <div><div style={{ fontSize: 11, color: '#888' }}>Country</div><div style={{ fontWeight: 600 }}>{groupProducts[0].countryRegister || 'Global'}</div></div>
+                            </div>
+                            {/* Bulk download buttons */}
+                            <div style={{ marginTop: 12, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 11, color: '#888', alignSelf: 'center' }}>Download:</span>
+                              {usernameIdx >= 0 && (
+                                <button className="btn btn-sm btn-secondary" onClick={() => {
+                                  const all = getAllAccounts();
+                                  const data = extractField(all.join('\n'), usernameIdx);
+                                  downloadText(data, `${title.replace(/[^a-z0-9]/gi, '_')}_usernames.txt`);
+                                }}>📥 Usernames</button>
+                              )}
+                              {passIdx >= 0 && (
+                                <button className="btn btn-sm btn-secondary" onClick={() => {
+                                  const all = getAllAccounts();
+                                  const data = extractField(all.join('\n'), passIdx);
+                                  downloadText(data, `${title.replace(/[^a-z0-9]/gi, '_')}_passwords.txt`);
+                                }}>📥 Passwords</button>
+                              )}
+                              {emailIdx >= 0 && (
+                                <button className="btn btn-sm btn-secondary" onClick={() => {
+                                  const all = getAllAccounts();
+                                  const data = extractField(all.join('\n'), emailIdx);
+                                  downloadText(data, `${title.replace(/[^a-z0-9]/gi, '_')}_emails.txt`);
+                                }}>📥 Emails</button>
+                              )}
+                              {emailIdx >= 0 && passIdx >= 0 && (
+                                <button className="btn btn-sm btn-secondary" onClick={() => {
+                                  const all = getAllAccounts();
+                                  const lines = all.map(line => {
+                                    const parts = line.split(':');
+                                    return `${parts[emailIdx] || ''}:${parts[passIdx] || ''}`;
+                                  }).filter(l => l !== ':');
+                                  downloadText(lines.join('\n'), `${title.replace(/[^a-z0-9]/gi, '_')}_email_pass.txt`);
+                                }}>📥 Email:Pass</button>
+                              )}
+                              <button className="btn btn-sm btn-secondary" onClick={() => {
+                                const all = getAllAccounts();
+                                downloadText(all.join('\n'), `${title.replace(/[^a-z0-9]/gi, '_')}_all_data.txt`);
+                              }}>📥 All Data</button>
+                            </div>
+                          </div>
+                        )}
+
+                        {isExpanded && view === 'vendors' && (
+                          <div style={{ padding: '8px 0' }}>
+                            {vendors.map(v => (
+                              <div key={v.id} className="row" style={{ cursor: 'pointer' }} onClick={() => loadUserDetail(v.id)}>
+                                <div style={{ flex: 1 }}>
+                                  <span style={{ fontWeight: 600 }}>{v.name || v.username}</span>
+                                  <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>@{v.username}</span>
+                                </div>
+                                <span className={`badge badge-${v.vendorStatus}`}>{v.vendorStatus}</span>
+                                <span style={{ fontSize: 12, color: '#888', marginLeft: 8 }}>{groupProducts.filter(p => p.vendor.id === v.id).length} product{groupProducts.filter(p => p.vendor.id === v.id).length !== 1 ? 's' : ''} · {groupProducts.filter(p => p.vendor.id === v.id).reduce((s, p) => s + p.stock, 0)} stock</span>
                               </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {isExpanded && view === 'list' && (
+                          <div style={{ padding: '4px 0' }}>
+                            {/* Product-level actions bar */}
+                            {groupProducts.map(p => {
+                              const accountLines = (p.accountsData || '').split(/\r?\n/).filter(Boolean);
+                              return (
+                                <div key={p.id} style={{ borderBottom: '2px solid #e0e0e0' }}>
+                                  {/* Vendor header for this product */}
+                                  <div style={{ padding: '6px 16px', background: '#fafafa', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                    <span
+                                      style={{ fontWeight: 600, fontSize: 12, color: '#1976d2', cursor: 'pointer', textDecoration: 'underline' }}
+                                      onClick={() => loadUserDetail(p.vendor.id)}
+                                    >@{p.vendor.username}</span>
+                                    <span className={`badge badge-${p.status}`} style={{ fontSize: 10 }}>{p.status}</span>
+                                    {p.isDuplicate && <span style={{ color: '#e53e3e', fontSize: 10 }}>[DUPE]</span>}
+                                    <span style={{ fontSize: 11, color: '#3ea136', fontWeight: 600 }}>{money(p.storePrice)}/ea</span>
+                                    <span style={{ fontSize: 11, color: '#888' }}>· {accountLines.length} accounts</span>
+                                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                                      {p.status === 'pending' && <button className="btn btn-primary btn-sm" onClick={() => doProductAction('approve', p.id)}>✅ Approve</button>}
+                                      {p.status === 'pending' && <button className="btn btn-danger btn-sm" onClick={() => { setRejectProduct(p); setRejectReason(''); }}>❌ Reject</button>}
+                                      <button className="btn btn-sm" style={{ background: p.status === 'hold' ? '#ff9800' : '#666', color: '#fff', border: 'none' }} onClick={() => doProductAction('hold', p.id)}>{p.status === 'hold' ? '▶ Unhold' : '⏸ Hold'}</button>
+                                      <button className="btn btn-secondary btn-sm" onClick={() => { setEditProduct(p); setEpTitle(p.title); setEpDesc(p.description); setEpPrice(String(p.vendorPrice)); setEpStock(String(p.stock)); }}>✏️ Edit</button>
+                                      <button className="btn btn-danger btn-sm" onClick={() => { if (confirm(`Delete product from @${p.vendor.username}?`)) doProductAction('delete', p.id); }}>🗑️</button>
+                                    </div>
+                                  </div>
+                                  {/* Account lines */}
+                                  {accountLines.length === 0 ? (
+                                    <div style={{ padding: '8px 16px', fontSize: 11, color: '#aaa', fontStyle: 'italic' }}>No accounts uploaded yet</div>
+                                  ) : (
+                                    accountLines.map((line, lineIdx) => {
+                                      const accountKey = `${p.id}:${lineIdx}`;
+                                      const isEditingThisLine = editingLine?.productId === p.id && editingLine?.lineIndex === lineIdx;
+                                      return (
+                                        <div key={lineIdx} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 16px', borderBottom: '1px solid #f5f5f5', background: isEditingThisLine ? '#fffde7' : selectedAccounts.has(accountKey) ? '#f0f7ff' : '#fff' }}>
+                                          <span style={{ fontSize: 10, color: '#aaa', width: 28, flexShrink: 0, textAlign: 'right' }}>#{lineIdx + 1}</span>
+                                          <input type="checkbox" checked={selectedAccounts.has(accountKey)} onChange={() => {
+                                            setSelectedAccounts(prev => {
+                                              const next = new Set(prev);
+                                              if (next.has(accountKey)) next.delete(accountKey); else next.add(accountKey);
+                                              return next;
+                                            });
+                                          }} style={{ flexShrink: 0 }} />
+                                          {isEditingThisLine ? (
+                                            <div style={{ flex: 1, display: 'flex', gap: 4 }}>
+                                              <input type="text" value={editingLineText} onChange={e => setEditingLineEdit(e.target.value)} style={{ flex: 1, fontFamily: 'monospace', fontSize: 11, padding: '2px 6px', border: '1px solid #3ea136', borderRadius: 3 }} autoFocus onKeyDown={e => {
+                                                if (e.key === 'Enter') {
+                                                  fetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'edit_account_line', productId: p.id, lineIndex: lineIdx, newLine: editingLineText }) })
+                                                    .then(r => r.json()).then(r => { if (r.success) { loadAll(); setEditingLine(null); } else alert(r.error); });
+                                                }
+                                                if (e.key === 'Escape') setEditingLine(null);
+                                              }} />
+                                              <button className="btn btn-primary btn-sm" onClick={() => {
+                                                fetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'edit_account_line', productId: p.id, lineIndex: lineIdx, newLine: editingLineText }) })
+                                                  .then(r => r.json()).then(r => { if (r.success) { loadAll(); setEditingLine(null); } else alert(r.error); });
+                                              }}>Save</button>
+                                              <button className="btn btn-secondary btn-sm" onClick={() => setEditingLine(null)}>Cancel</button>
+                                            </div>
+                                          ) : (
+                                            <span style={{ flex: 1, fontFamily: 'monospace', fontSize: 11, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{line}</span>
+                                          )}
+                                          {!isEditingThisLine && (
+                                            <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                                              <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, padding: '1px 5px' }} title="Edit line" onClick={() => { setEditingLine({ productId: p.id, lineIndex: lineIdx }); setEditingLineEdit(line); }}>✏️</button>
+                                              <button className="btn btn-danger btn-sm" style={{ fontSize: 10, padding: '1px 5px' }} title="Delete line" onClick={() => {
+                                                if (confirm(`Delete this account line?`)) {
+                                                  fetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete_account_line', productId: p.id, lineIndex: lineIdx }) })
+                                                    .then(r => r.json()).then(r => { if (r.success) loadAll(); else alert(r.error); });
+                                                }
+                                              }}>🗑️</button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {/* Bulk actions bar */}
+                            <div style={{ padding: '8px 16px', display: 'flex', gap: 6, flexWrap: 'wrap', borderTop: '2px solid #e0e0e0', background: '#fafafa', alignItems: 'center' }}>
+                              {selectedAccounts.size > 0 && (
+                                <>
+                                  <span style={{ fontSize: 11, fontWeight: 600, color: '#1976d2' }}>{selectedAccounts.size} selected</span>
+                                  <button className="btn btn-danger btn-sm" onClick={() => {
+                                    if (confirm(`Delete ${selectedAccounts.size} selected account lines? This cannot be undone.`)) {
+                                      const entries = Array.from(selectedAccounts).map(k => { const [pid, idx] = k.split(':'); return { productId: pid, lineIndex: parseInt(idx) }; });
+                                      entries.sort((a, b) => b.lineIndex - a.lineIndex);
+                                      (async () => {
+                                        for (const e of entries) {
+                                          await fetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete_account_line', productId: e.productId, lineIndex: e.lineIndex }) });
+                                        }
+                                        setSelectedAccounts(new Set());
+                                        loadAll();
+                                      })();
+                                    }
+                                  }}>🗑️ Delete Selected</button>
+                                </>
+                              )}
+                              <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                                <span style={{ fontSize: 11, color: '#888', alignSelf: 'center' }}>Download:</span>
+                                {usernameIdx >= 0 && <button className="btn btn-sm btn-secondary" onClick={() => { const all = getAllAccounts(); downloadText(extractField(all.join('\n'), usernameIdx), `${title.replace(/[^a-z0-9]/gi, '_')}_usernames.txt`); }}>📥 Usernames</button>}
+                                {passIdx >= 0 && <button className="btn btn-sm btn-secondary" onClick={() => { const all = getAllAccounts(); downloadText(extractField(all.join('\n'), passIdx), `${title.replace(/[^a-z0-9]/gi, '_')}_passwords.txt`); }}>📥 Passwords</button>}
+                                {emailIdx >= 0 && <button className="btn btn-sm btn-secondary" onClick={() => { const all = getAllAccounts(); downloadText(extractField(all.join('\n'), emailIdx), `${title.replace(/[^a-z0-9]/gi, '_')}_emails.txt`); }}>📥 Emails</button>}
+                                {emailIdx >= 0 && passIdx >= 0 && <button className="btn btn-sm btn-secondary" onClick={() => {
+                                  const all = getAllAccounts();
+                                  const lines = all.map(line => { const parts = line.split(':'); return `${parts[emailIdx] || ''}:${parts[passIdx] || ''}`; }).filter(l => l !== ':');
+                                  downloadText(lines.join('\n'), `${title.replace(/[^a-z0-9]/gi, '_')}_email_pass.txt`);
+                                }}>📥 Email:Pass</button>}
+                                <button className="btn btn-sm btn-secondary" onClick={() => { const all = getAllAccounts(); downloadText(all.join('\n'), `${title.replace(/[^a-z0-9]/gi, '_')}_all.txt`); }}>📥 All Data ({allAccountsCount} lines)</button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
               </>
             )}
 
@@ -495,7 +879,7 @@ export function AdminDashboard() {
                       <div><div style={{ fontSize: 11, color: "#888" }}>Platform</div><div style={{ fontWeight: 600 }}>{platformLabel(selectedProduct.platform)}</div></div>
                       <div><div style={{ fontSize: 11, color: "#888" }}>Category</div><div style={{ fontWeight: 600 }}>{selectedProduct.category}</div></div>
                       <div><div style={{ fontSize: 11, color: "#888" }}>Status</div><div><span className={`badge badge-${selectedProduct.status}`}>{selectedProduct.status}</span></div></div>
-                      <div><div style={{ fontSize: 11, color: "#888" }}>Vendor</div><div style={{ fontWeight: 600 }}>{selectedProduct.vendor.username}</div></div>
+                      <div><div style={{ fontSize: 11, color: "#888" }}>Vendor</div><div style={{ fontWeight: 600, color: '#1976d2', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => loadUserDetail(selectedProduct.vendor.id)}>@{selectedProduct.vendor.username}</div></div>
                       <div><div style={{ fontSize: 11, color: "#888" }}>Price</div><div style={{ fontWeight: 600, color: "#3ea136" }}>{money(selectedProduct.storePrice)}</div></div>
                       <div><div style={{ fontSize: 11, color: "#888" }}>Stock</div><div style={{ fontWeight: 600 }}>{selectedProduct.stock}</div></div>
                     </div>
@@ -523,7 +907,7 @@ export function AdminDashboard() {
                     <div className="panel-head">Purchases ({selectedProduct.purchases.length})</div>
                     {selectedProduct.purchases.map(p => (
                       <div key={p.id} className="row" style={{ fontSize: 12 }}>
-                        <div style={{ flex: 1 }}><span style={{ fontWeight: 600 }}>{p.buyer.username}</span> · {p.quantity}x</div>
+                        <div style={{ flex: 1 }}><span style={{ fontWeight: 600, color: '#1976d2', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => loadUserDetail(p.buyer.id)}>{p.buyer.username}</span> · {p.quantity}x</div>
                         <span style={{ fontWeight: 600, color: "#3ea136" }}>{money(p.total)}</span>
                         <span className={`badge badge-${p.status}`} style={{ marginLeft: 8 }}>{p.status}</span>
                         <span style={{ fontSize: 10, color: "#aaa", marginLeft: 8 }}>{new Date(p.createdAt).toLocaleDateString()}</span>
@@ -537,7 +921,7 @@ export function AdminDashboard() {
                     <div className="panel-head">Reviews ({selectedProduct.reviews.length})</div>
                     {selectedProduct.reviews.map(r => (
                       <div key={r.id} className="row" style={{ fontSize: 12 }}>
-                        <div style={{ flex: 1 }}><span style={{ fontWeight: 600 }}>{r.buyer.username}</span> · {"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)} · {r.comment}</div>
+                        <div style={{ flex: 1 }}><span style={{ fontWeight: 600, color: '#1976d2', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => loadUserDetail(r.buyer.id)}>{r.buyer.username}</span> · {"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)} · {r.comment}</div>
                         <span style={{ fontSize: 10, color: "#aaa" }}>{new Date(r.createdAt).toLocaleDateString()}</span>
                       </div>
                     ))}
@@ -555,7 +939,7 @@ export function AdminDashboard() {
                     <div key={o.id} className="row">
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600 }}>{o.product.title}</div>
-                        <div style={{ fontSize: 11, color: "#888" }}>Buyer: {o.buyer.username} · Vendor: {o.product.vendor.username} · {o.quantity}x</div>
+                        <div style={{ fontSize: 11, color: "#888" }}>Buyer: {o.buyer?.username ?? "—"} · Vendor: {o.product.vendor?.username ?? "—"} · {o.quantity}x</div>
                       </div>
                       <span style={{ fontWeight: 700, color: "#3ea136" }}>{money(o.total)}</span>
                       <span className={`badge badge-${o.status}`} style={{ marginLeft: 8 }}>{o.status}</span>
@@ -796,7 +1180,7 @@ export function AdminDashboard() {
                           <div key={o.id} className="row">
                             <div style={{ flex: 1 }}>
                               <div style={{ fontSize: 13, fontWeight: 600 }}>{o.product.title}</div>
-                              <div style={{ fontSize: 11, color: "#888" }}>{o.buyer.username} bought {o.quantity}x from {o.product.vendor.username}</div>
+                              <div style={{ fontSize: 11, color: "#888" }}>{o.buyer?.username ?? "—"} bought {o.quantity}x from {o.product.vendor?.username ?? "—"}</div>
                             </div>
                             <span style={{ fontWeight: 700, color: "#3ea136" }}>+{money(o.total)}</span>
                             <span style={{ fontSize: 10, color: "#aaa", marginLeft: 8 }}>{new Date(o.createdAt).toLocaleDateString()}</span>

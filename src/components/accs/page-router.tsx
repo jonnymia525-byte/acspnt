@@ -34,18 +34,29 @@ export function PageRouter({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const a = (e.target as HTMLElement).closest("a[href]");
-      if (a) {
-        const href = a.getAttribute("href");
-        if (href?.startsWith("/?page=")) {
-          e.preventDefault();
-          const page = new URL(href, window.location.origin).searchParams.get("page");
-          window.history.pushState({}, "", href);
-          setPage(page);
-        }
+      if (!a) return;
+      const href = a.getAttribute("href");
+      if (!href) return;
+
+      // Handle store link (href="/")
+      if (href === "/" || href === window.location.origin + "/") {
+        e.preventDefault();
+        window.history.pushState({}, "", "/");
+        setPage(null);
+        return;
+      }
+
+      // Handle page links (href="/?page=xxx")
+      if (href.startsWith("/?page=")) {
+        e.preventDefault();
+        const page = new URL(href, window.location.origin).searchParams.get("page");
+        window.history.pushState({}, "", href);
+        setPage(page);
+        return;
       }
     };
-    document.addEventListener("click", handler);
-    return () => document.removeEventListener("click", handler);
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
   }, []);
 
   if (!page) return <>{children}</>;

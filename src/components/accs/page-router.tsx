@@ -12,6 +12,7 @@ import { FAQPage } from "./pages/faq-page";
 import { RulesPage } from "./pages/rules-page";
 import { SupportPage } from "./pages/support-page";
 import { SellerTermsPage } from "./pages/seller-terms-page";
+import { USDTDeposit } from "./widgets/usdt-deposit";
 
 export function PageRouter({ children }: { children: React.ReactNode }) {
   const [page, setPage] = useState<string | null>(null);
@@ -73,6 +74,7 @@ export function PageRouter({ children }: { children: React.ReactNode }) {
     case "rules": return <RulesPage />;
     case "support": return <SupportPage />;
     case "seller-terms": return <SellerTermsPage />;
+    case "deposit": return <USDTDeposit />;
     default: return <>{children}</>;
   }
 }

@@ -65,7 +65,7 @@ export async function POST(req: Request) {
 
   const listing = await prisma.listing.findUnique({
     where: { id: listingId },
-    select: { id: true, title: true, platform: true, bestSeller: true },
+    select: { id: true, title: true, platform: true, bestSeller: true, visible: true },
   });
   if (!listing) return NextResponse.json({ error: "Listing not found" }, { status: 404 });
 
@@ -94,6 +94,36 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({ success: true, bestSeller: newBestSeller });
+  }
+
+  if (action === "toggle_visible") {
+    const newVisible = !listing.visible;
+    await prisma.listing.update({
+      where: { id: listingId },
+      data: { visible: newVisible },
+    });
+    await prisma.activityLog.create({
+      data: {
+        action: newVisible ? "listing_unhidden" : "listing_hidden",
+        description: `Admin ${newVisible ? "showed" : "hid"} listing "${listing.title}" ${newVisible ? "for users" : "from users"}`,
+        userId: admin.id,
+      },
+    });
+    return NextResponse.json({ success: true, visible: newVisible });
+  }
+
+  if (action === "delete_listing") {
+    // Soft delete: hide listing and all its products
+    await prisma.product.updateMany({ where: { listingId }, data: { deletedAt: new Date(), visible: false, status: "deleted" } });
+    await prisma.listing.update({ where: { id: listingId }, data: { deletedAt: new Date(), visible: false } });
+    await prisma.activityLog.create({
+      data: {
+        action: "listing_deleted",
+        description: `Admin deleted listing "${listing.title}"`,
+        userId: admin.id,
+      },
+    });
+    return NextResponse.json({ success: true });
   }
 
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });

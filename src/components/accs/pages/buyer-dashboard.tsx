@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { useStore } from "@/store";
 import { money } from "@/lib/money";
 
+
 interface Data {
   user: { id: string; username: string; name: string; role: string; balance: number; twoFaEnabled: boolean };
   stats: { balance: number; orders: number; units: number; spent: number; openDisputes: number };
@@ -26,27 +27,13 @@ export function BuyerDashboard() {
   const { setUser } = useStore();
   const [tab, setTab] = useState("overview");
   const [data, setData] = useState<Data | null>(null);
-  const [showDeposit, setShowDeposit] = useState(false);
-  const [depAmount, setDepAmount] = useState("");
-  const [depMethod, setDepMethod] = useState("crypto");
-  const [depositing, setDepositing] = useState(false);
+
   const [reportId, setReportId] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState("");
 
   const refresh = () => fetch("/api/dashboard/buyer").then(r => r.json()).then(d => { if (d.user) { setData(d); setUser(d.user); } }).catch(() => {});
 
   useEffect(() => { refresh(); }, [setUser]);
-
-  const handleDeposit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const amt = parseFloat(depAmount);
-    if (amt < 5) { alert("Minimum deposit is $5"); return; }
-    setDepositing(true);
-    const res = await fetch("/api/deposits", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount: amt, method: depMethod }) });
-    const r = await res.json();
-    setDepositing(false);
-    if (r.success) { alert(`Deposited $${amt}. New balance: $${r.balance}`); setShowDeposit(false); setDepAmount(""); refresh(); } else alert(r.error);
-  };
 
   if (!data) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f5f5f5" }}>Loading...</div>;
 
@@ -56,7 +43,7 @@ export function BuyerDashboard() {
       <div className="topbar">
         <div className="news-link"><span className="news-dot" /> News</div>
         <Link href="/" style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#3ea136", borderRadius: 3, textDecoration: "none", fontWeight: 600 }}>Store</Link>
-        <button onClick={() => setShowDeposit(true)} style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#5fa830", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 600 }}>Deposit</button>
+        <Link href="/?page=deposit" style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#5fa830", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 600, textDecoration: "none" }}>Deposit</Link>
         <span style={{ color: "#5fa830", fontSize: 12, fontWeight: 700 }}>{money(data.user.balance)}</span>
         <span style={{ color: "#888", fontSize: 11 }}>{data.user.name}</span>
         <Link href="/" style={{ color: "#aaa", fontSize: 11 }}>Logout</Link>
@@ -204,10 +191,10 @@ export function BuyerDashboard() {
                   <div style={{ padding: 16 }}>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
                       {[10, 25, 50, 100].map(amt => (
-                        <button key={amt} onClick={() => { setDepAmount(String(amt)); setShowDeposit(true); }}
-                          className="btn btn-primary" style={{ fontSize: 13, padding: "10px 0" }}>
+                        <Link key={amt} href="/?page=deposit"
+                          style={{ display: "block", fontSize: 13, padding: "10px 0", textAlign: "center", borderRadius: 4, background: "#3ea136", color: "#fff", textDecoration: "none", fontWeight: 600 }}>
                           ${amt}
-                        </button>
+                        </Link>
                       ))}
                     </div>
                   </div>
@@ -247,35 +234,7 @@ export function BuyerDashboard() {
         </div>
       </div>
 
-      {/* Deposit Modal */}
-      {showDeposit && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setShowDeposit(false)}>
-          <div style={{ background: "#fff", borderRadius: 6, width: 360, maxWidth: "90vw" }} onClick={e => e.stopPropagation()}>
-            <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", fontWeight: 600, fontSize: 15 }}>Deposit Funds</div>
-            <form onSubmit={handleDeposit} style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-              <div>
-                <label className="label">Method</label>
-                <select value={depMethod} onChange={e => setDepMethod(e.target.value)} className="input">
-                  <option value="crypto">Crypto (USDT/BTC/ETH)</option>
-                  <option value="paypal">PayPal</option>
-                  <option value="stripe">Stripe (Card)</option>
-                  <option value="manual">Manual Transfer</option>
-                </select>
-              </div>
-              <div>
-                <label className="label">Amount ($)</label>
-                <input type="number" step="0.01" min="5" value={depAmount} onChange={e => setDepAmount(e.target.value)} className="input" required placeholder="5.00" />
-                <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>Minimum deposit: $5.00</div>
-              </div>
-              <div style={{ fontSize: 12, color: "#888" }}>Current balance: <strong style={{ color: "#3ea136" }}>{money(data.user.balance)}</strong></div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" onClick={() => setShowDeposit(false)} className="btn btn-secondary" style={{ flex: 1 }}>Cancel</button>
-                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={depositing}>{depositing ? "Processing..." : "Deposit"}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+
       {/* Report Modal */}
       {reportId && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setReportId(null)}>

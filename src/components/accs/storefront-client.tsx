@@ -10,6 +10,7 @@ import { money } from "@/lib/money";
 import { BuyModal } from "./widgets/buy-modal";
 import { ChatWidget } from "./widgets/chat-widget";
 
+
 interface Vendor { id: string; username: string; vendorCountry?: string; vendorStatus?: string; }
 interface Product {
   id: string; title: string; platform: string; category: string;
@@ -20,7 +21,7 @@ interface Product {
 interface Listing {
   id: string; title: string; platform: string; category: string;
   deliveryFormat: string; countryRegister: string; originalMail: boolean;
-  country: string; products: Product[]; bestSeller?: boolean;
+  country: string; products: Product[]; bestSeller?: boolean; visible?: boolean;
 }
 interface TrendingProduct extends Product {
   avgRating: number; ratingCount: number;
@@ -36,6 +37,7 @@ interface Props {
   totalListings: number;
   totalPlatforms: number;
   totalStock: number;
+  isAdmin?: boolean;
 }
 
 const PLATFORM_ICONS: Record<string, { svg: string; color: string }> = {
@@ -138,7 +140,7 @@ function ProductIcon({ platform }: { platform: string }) {
   );
 }
 
-export function StorefrontClient({ platforms, trending, totalListings, totalPlatforms, totalStock }: Props) {
+export function StorefrontClient({ platforms, trending, totalListings, totalPlatforms, totalStock, isAdmin }: Props) {
   const { user, setUser, theme, toggleTheme, lang, setLang } = useStore();
   const t = getDictionary(lang);
   const [searchQuery, setSearchQuery] = useState("");
@@ -146,10 +148,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
   const [showCat, setShowCat] = useState(false);
   const [buyListing, setBuyListing] = useState<Listing | null>(null);
   const [langOpen, setLangOpen] = useState(false);
-  const [showDeposit, setShowDeposit] = useState(false);
-  const [depAmount, setDepAmount] = useState("");
-  const [depMethod, setDepMethod] = useState("crypto");
-  const [depositing, setDepositing] = useState(false);
+
   const [expandedPlatforms, setExpandedPlatforms] = useState<Record<string, boolean>>({});
   const [detailListing, setDetailListing] = useState<Listing | null>(null);
   const [contactListing, setContactListing] = useState<Listing | null>(null);
@@ -160,6 +159,9 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
   const [editDesc, setEditDesc] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editStock, setEditStock] = useState("");
+  const [siteNotice, setSiteNotice] = useState("");
+  const [siteWarranty, setSiteWarranty] = useState("48");
+  const [socialLinks, setSocialLinks] = useState<Record<string, string>>({});
   const catRef = useRef<HTMLDivElement>(null);
   const langRef = useRef<HTMLDivElement>(null);
 
@@ -167,6 +169,18 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
     fetch("/api/auth/me").then(r => r.json()).then(d => { if (d.user) setUser(d.user); }).catch(() => {});
     const saved = localStorage.getItem("accsm-theme");
     if (saved) useStore.getState().setTheme(saved);
+    // Fetch site settings
+    fetch("/api/settings").then(r => r.json()).then(d => {
+      if (d.settings) {
+        if (d.settings.promotion_notice) setSiteNotice(d.settings.promotion_notice);
+        if (d.settings.order_warranty_hours) setSiteWarranty(d.settings.order_warranty_hours);
+        const socs: Record<string, string> = {};
+        for (const [k, v] of Object.entries(d.settings)) {
+          if (k.startsWith("social_") && v) socs[k] = v as string;
+        }
+        setSocialLinks(socs);
+      }
+    }).catch(() => {});
   }, [setUser]);
 
   useEffect(() => {
@@ -199,7 +213,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
         <Link href="/?page=login" className="btn-login">Login</Link></>}
         {user && <>
           <a href={dashUrl(user.role)} style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#3ea136", borderRadius: 3, textDecoration: "none", fontWeight: 600 }}>Dashboard</a>
-          <button onClick={() => setShowDeposit(true)} style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#5fa830", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 600 }}>Deposit</button>
+          <Link href="/?page=deposit" style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#5fa830", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 600, textDecoration: "none" }}>Deposit</Link>
           <span style={{ color: "#5fa830", fontSize: 12, fontWeight: 700 }}>{money(user.balance)}</span>
           <button onClick={logout} style={{ color: "#aaa", fontSize: 11, background: "none", border: "none", cursor: "pointer" }}>Logout</button>
         </>}
@@ -262,9 +276,9 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
       </div>
 
       {/* NOTICE */}
-      <div className="notice">
-        News, promotions, coupons, announcements are published on our news site - <a href="#">accspoint.news</a>
-      </div>
+      {siteNotice && (
+        <div className="notice" dangerouslySetInnerHTML={{ __html: siteNotice.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/on\w+="[^"]*"/gi, '').replace(/accspoint\.news/g, '<a href="#">accspoint.news</a>') }} />
+      )}
 
       {/* BREADCRUMBS */}
       <div className="breadcrumbs">Home</div>
@@ -321,20 +335,41 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
                   </div>
                 </div>
                 <div className="product-tags">
-                  <span className="tag tag-warranty">48h</span>
+                  <span className="tag tag-warranty">{siteWarranty}h</span>
                   {listing.category === "fresh" && <span className="tag tag-new">NEW</span>}
                   {listing.category === "verified" && <span className="tag tag-star">★ Verified</span>}
                   {listing.category === "aged" && <span className="tag tag-star">★ Aged</span>}
                   {listing.bestSeller && <span className="tag tag-bestseller">🔥 Best Seller</span>}
+                  {listing.visible === false && <span className="tag" style={{ background: '#ff9800', color: '#fff', fontSize: 9 }}>HIDDEN</span>}
                 </div>
                 <div className="stock-col"><strong>{product.stock.toLocaleString()}</strong></div>
                 <div className="unit-col">per pc</div>
                 <div className="price-col"><span className="price-from">from </span>{money(product.storePrice)}</div>
                 {user?.role === 'admin' ? (
-                  <button className="buy-btn" style={{ background: '#1976d2' }}
-                    onClick={e => { e.stopPropagation(); setEditListing(listing); setEditTitle(listing.title); setEditDesc(listing.deliveryFormat || ''); setEditPrice(String(product.storePrice)); setEditStock(String(product.stock)); }}>
-                    Edit
-                  </button>
+                  <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                    <button className="buy-btn" style={{ background: '#1976d2', padding: '6px 10px', fontSize: 11 }}
+                      onClick={e => { e.stopPropagation(); setEditListing(listing); setEditTitle(listing.title); setEditDesc(listing.deliveryFormat || ''); setEditPrice(String(product.storePrice)); setEditStock(String(product.stock)); }}>
+                      ✏️ Edit
+                    </button>
+                    <button className="buy-btn" style={{ background: listing.visible === false ? '#ff9800' : '#666', padding: '6px 10px', fontSize: 11 }}
+                      onClick={e => {
+                        e.stopPropagation();
+                        fetch('/api/admin/listings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'toggle_visible', listingId: listing.id }) })
+                          .then(r => r.json()).then(r => { if (r.success) location.reload(); else alert(r.error || 'Failed'); });
+                      }}>
+                      {listing.visible === false ? '👁 Show' : '🙈 Hide'}
+                    </button>
+                    <button className="buy-btn" style={{ background: '#e53e3e', padding: '6px 10px', fontSize: 11 }}
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (confirm(`Delete listing "${listing.title}"? This will remove all products under it.`)) {
+                          fetch('/api/admin/listings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete_listing', listingId: listing.id }) })
+                            .then(r => r.json()).then(r => { if (r.success) location.reload(); else alert(r.error || 'Failed'); });
+                        }
+                      }}>
+                      🗑️
+                    </button>
+                  </div>
                 ) : product.stock > 0 ? (
                   <button className="buy-btn"
                     onClick={e => { e.stopPropagation(); setBuyListing(listing); }}>
@@ -394,24 +429,18 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
               </span>
               <span>Direct Message</span>
             </a>
-            <a href="https://t.me/accspoint" target="_blank" rel="noopener noreferrer" className="footer-contact-link">
-              <span className="footer-contact-icon" style={{ background: '#0088CC' }}>
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="white"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.492-1.302.48-.428-.013-1.252-.242-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
-              </span>
-              <span>Telegram</span>
-            </a>
-            <a href="https://facebook.com/accspoint" target="_blank" rel="noopener noreferrer" className="footer-contact-link">
-              <span className="footer-contact-icon" style={{ background: '#1877F2' }}>
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="white"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
-              </span>
-              <span>Facebook</span>
-            </a>
-            <a href="https://wa.me/1234567890" target="_blank" rel="noopener noreferrer" className="footer-contact-link">
-              <span className="footer-contact-icon" style={{ background: '#25D366' }}>
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-              </span>
-              <span>WhatsApp</span>
-            </a>
+            {Object.entries(socialLinks).map(([key, url]) => {
+              const name = key.replace('social_', '');
+              const colors: Record<string, string> = { twitter: '#1DA1F2', telegram: '#0088CC', discord: '#5865F2', facebook: '#1877F2', instagram: '#E1306C', youtube: '#FF0000', tiktok: '#000', reddit: '#FF4500' };
+              return (
+                <a key={key} href={url} target="_blank" rel="noopener noreferrer" className="footer-contact-link">
+                  <span className="footer-contact-icon" style={{ background: colors[name] || '#666' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'capitalize' }}>{name.charAt(0).toUpperCase()}</span>
+                  </span>
+                  <span style={{ textTransform: 'capitalize' }}>{name}</span>
+                </a>
+              );
+            })}
           </div>
         </div>
         <div className="footer-bottom">
@@ -567,43 +596,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
         </div>
       )}
 
-      {showDeposit && user && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setShowDeposit(false)}>
-          <div style={{ background: "#fff", borderRadius: 8, width: 360, maxWidth: "90vw" }} onClick={e => e.stopPropagation()}>
-            <div style={{ padding: "14px 16px", borderBottom: "1px solid #e5e5e5", fontWeight: 700, fontSize: 15 }}>Deposit Funds</div>
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              const amt = parseFloat(depAmount);
-              if (amt < 5) { alert("Minimum deposit is $5"); return; }
-              setDepositing(true);
-              const res = await fetch("/api/deposits", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount: amt, method: depMethod }) });
-              const r = await res.json();
-              setDepositing(false);
-              if (r.success) { alert(`Deposited $${amt}. New balance: $${r.balance}`); setShowDeposit(false); setDepAmount(""); location.reload(); } else alert(r.error);
-            }} style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-              <div>
-                <label className="label">Method</label>
-                <select value={depMethod} onChange={e => setDepMethod(e.target.value)} className="input">
-                  <option value="crypto">Crypto (USDT/BTC/ETH)</option>
-                  <option value="paypal">PayPal</option>
-                  <option value="stripe">Stripe (Card)</option>
-                  <option value="manual">Manual Transfer</option>
-                </select>
-              </div>
-              <div>
-                <label className="label">Amount ($)</label>
-                <input type="number" step="0.01" min="5" value={depAmount} onChange={e => setDepAmount(e.target.value)} className="input" required placeholder="5.00" />
-                <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>Minimum deposit: $5.00</div>
-              </div>
-              <div style={{ fontSize: 12, color: "#888" }}>Current balance: <strong style={{ color: "#3ea136" }}>{money(user.balance)}</strong></div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" onClick={() => setShowDeposit(false)} style={{ flex: 1, padding: "8px 0", border: "1px solid #ddd", borderRadius: 4, background: "#fff", cursor: "pointer", fontSize: 13 }}>Cancel</button>
-                <button type="submit" disabled={depositing} style={{ flex: 1, padding: "8px 0", border: "none", borderRadius: 4, background: "#3ea136", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>{depositing ? "Processing..." : "Deposit"}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+
 
       <ChatWidget />
     </>

@@ -1,23 +1,34 @@
 "use client";
 
 import Link from "next/link";
+import { useState, useEffect } from "react";
 import { useStore } from "@/store";
 
-const TERMS = [
-  "All accounts must be legitimately obtained. Stolen accounts result in permanent ban.",
-  "40% commission on all sales. Store price = vendor price x 1.4.",
-  "Inaccurate listings removed after first warning. Repeated violations = suspension.",
-  "Accounts delivered in login:password:email:email_pass format automatically.",
-  "Sellers must respond to disputes within 48 hours.",
-  "Maintain minimum 3.0 star rating. Below threshold for 30 days = suspension.",
-  "24-hour holding period on withdrawals. Fees deducted per method.",
-  "No adult content, illegal products, or prohibited region accounts.",
-  "Account suspension for policy violations. 7-day appeal window.",
-  "By applying you agree to these terms. Terms may be updated with notice.",
+interface TermItem { t: string; d: string; }
+
+const DEFAULT_TERMS: TermItem[] = [
+  { t: "Account Authenticity", d: "All accounts must be legitimately obtained. Stolen accounts result in permanent ban." },
+  { t: "Commission", d: "Platform commission on all sales. Store price calculated accordingly." },
+  { t: "Listing Standards", d: "Inaccurate listings removed after first warning. Repeated violations = suspension." },
+  { t: "Delivery", d: "Accounts delivered in login:password:email:email_pass format automatically." },
+  { t: "Dispute Response", d: "Sellers must respond to disputes within 48 hours." },
+  { t: "Ratings", d: "Maintain minimum 3.0 star rating. Below threshold for 30 days = suspension." },
+  { t: "Withdrawals", d: "24-hour holding period on withdrawals. Fees deducted per method." },
+  { t: "Prohibited Content", d: "No adult content, illegal products, or prohibited region accounts." },
+  { t: "Suspension", d: "Account suspension for policy violations. 7-day appeal window." },
+  { t: "Agreement", d: "By applying you agree to these terms. Terms may be updated with notice." },
 ];
 
 export function SellerTermsPage() {
   const { user } = useStore();
+  const [terms, setTerms] = useState<TermItem[]>(DEFAULT_TERMS);
+
+  useEffect(() => {
+    fetch("/api/page-content?page=seller_terms").then(r => r.json()).then(d => {
+      if (d.content?.items?.length) setTerms(d.content.items);
+    }).catch(() => {});
+  }, []);
+
   return (
     <div style={{ minHeight: "100vh", background: "#f5f5f5" }}>
       {/* Top Bar */}
@@ -63,7 +74,11 @@ export function SellerTermsPage() {
         <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 16 }}>Seller Terms</h1>
         <div className="panel">
           <ol style={{ padding: "12px 14px 12px 30px", margin: 0 }}>
-            {TERMS.map((t, i) => <li key={i} style={{ fontSize: 13, color: "#555", lineHeight: 1.6, marginBottom: 6 }}>{t}</li>)}
+            {terms.map((t, i) => (
+              <li key={i} style={{ fontSize: 13, color: "#555", lineHeight: 1.6, marginBottom: 6 }}>
+                <strong>{t.t}:</strong> {t.d}
+              </li>
+            ))}
           </ol>
         </div>
         <Link href="/?page=login" className="btn btn-primary" style={{ marginTop: 12, display: "inline-block", textDecoration: "none" }}>Apply as Seller</Link>

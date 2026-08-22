@@ -32,6 +32,21 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  // Referral system
+  referralCode    String?   @unique
+  referredById    String?
+  referredBy      User?     @relation("Referrals", fields: [referredById], references: [id])
+  referrals       User[]    @relation("Referrals")
+  referralEarnings Float    @default(0)
+
+  // Vendor enhancements
+  vendorBio       String    @default("")
+  vendorLogo      String?
+  vendorRating    Float     @default(0)
+  vendorSalesCount Int      @default(0)
+  vendorResponseTime Float?
+  vendorFulfillmentRate Float @default(100)
+
   ownedListings     Listing[]
   ownedProducts     Product[]
   purchases         Purchase[]
@@ -50,9 +65,17 @@ model User {
   vendorRequests    VendorRequest[]
   emailLogs         EmailLog[]
   usedCoupons       UsedCoupon[]
+  wishlists         Wishlist[]
+  restockNotifs     RestockNotification[]
+  apiKeys           ApiKey[]
+  invoices          Invoice[]
+  bulkCartItems     BulkCart[]
+  vendorMessages    VendorMessage[]  @relation("VendorMsgReceiver")
+  vendorMessagesSent VendorMessage[] @relation("VendorMsgSender")
 
   @@index([role])
   @@index([vendorStatus])
+  @@index([referralCode])
 }
 
 model Listing {
@@ -70,6 +93,7 @@ model Listing {
   bestSeller      Boolean   @default(false)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
 
   vendorId        String?
   vendor          User?     @relation(fields: [vendorId], references: [id])
@@ -101,18 +125,29 @@ model Product {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  // Enhanced fields
+  lowStockThreshold Int     @default(5)
+  views             Int     @default(0)
+  totalSales        Int     @default(0)
+  avgResponseTime   Float?
+  deletedAt         DateTime?
+
   listingId       String?
   listing         Listing?  @relation(fields: [listingId], references: [id])
   vendorId        String
   vendor          User      @relation(fields: [vendorId], references: [id])
   purchases       Purchase[]
   reviews         Review[]
+  wishlists       Wishlist[]
+  restockNotifs   RestockNotification[]
+  bulkCartItems   BulkCart[]
 
   @@index([vendorId])
   @@index([platform])
   @@index([status])
   @@index([listingId])
   @@index([visible])
+  @@index([stock])
 }
 
 model Purchase {
@@ -126,6 +161,11 @@ model Purchase {
   status       String    @default("completed")
   createdAt    DateTime  @default(now())
 
+  // Commission & earnings
+  commissionAmount Float  @default(0)
+  vendorEarning    Float  @default(0)
+  platformFee      Float  @default(0)
+
   buyerId      String
   buyer        User      @relation(fields: [buyerId], references: [id])
   productId    String
@@ -136,19 +176,23 @@ model Purchase {
 }
 
 model Deposit {
-  id          String   @id @default(cuid())
-  amount      Float
-  method      String
-  status      String   @default("pending")
-  txId        String?
-  createdAt   DateTime @default(now())
-  completedAt DateTime?
+  id           String   @id @default(cuid())
+  amount       Float
+  method       String
+  status       String   @default("pending")
+  txId         String?
+  network      String?
+  exactAmount  Float?
+  txHash       String?
+  createdAt    DateTime @default(now())
+  completedAt  DateTime?
 
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([status])
+  @@index([txHash])
 }
 
 model Dispute {
@@ -158,6 +202,9 @@ model Dispute {
   resolution  String?
   createdAt   DateTime @default(now())
   resolvedAt  DateTime?
+  evidenceUrls String? // JSON array of evidence file URLs
+  slaDeadline DateTime?
+  adminNote   String?
 
   buyerId     String
   buyer       User     @relation(fields: [buyerId], references: [id])
@@ -227,19 +274,22 @@ model DirectReport {
 }
 
 model SupportTicket {
-  id          String   @id @default(cuid())
-  subject     String
-  category    String
-  priority    String   @default("normal")
-  message     String
-  status      String   @default("open")
-  reply       String?
-  createdAt   DateTime @default(now())
+  id            String   @id @default(cuid())
+  subject       String
+  category      String
+  priority      String   @default("normal")
+  message       String
+  status        String   @default("open")
+  reply         String?
+  attachmentUrl String?
+  attachmentName String?
+  createdAt     DateTime @default(now())
+  autoEscalated Boolean  @default(false)
 
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  repliedById String?
-  repliedBy   User?    @relation("TicketsGiven", fields: [repliedById], references: [id])
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  repliedById   String?
+  repliedBy     User?    @relation("TicketsGiven", fields: [repliedById], references: [id])
 
   @@index([userId])
   @@index([status])
@@ -256,6 +306,8 @@ model Coupon {
   expiresAt   DateTime?
   active      Boolean   @default(true)
   createdAt   DateTime  @default(now())
+  deletedAt   DateTime?
+  vendorId    String?   // vendor-specific coupons
 
   usedCoupons UsedCoupon[]
 
@@ -363,4 +415,160 @@ model EmailLog {
 
   @@index([toEmail])
   @@index([templateKey])
+}
+
+// ==================== NEW MODELS ====================
+
+model Wishlist {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+
+  @@unique([userId, productId])
+  @@index([userId])
+}
+
+model RestockNotification {
+  id        String   @id @default(cuid())
+  status    String   @default("pending") // pending, notified
+  createdAt DateTime @default(now())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+
+  @@unique([userId, productId])
+  @@index([userId])
+  @@index([status])
+}
+
+model Referral {
+  id           String   @id @default(cuid())
+  referralCode String
+  referredById String
+  referredById_2 String  // the user who was referred
+  earnings     Float    @default(0)
+  createdAt    DateTime @default(now())
+
+  @@index([referralCode])
+  @@index([referredById])
+}
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  name      String
+  key       String   @unique
+  active    Boolean  @default(true)
+  lastUsed  DateTime?
+  createdAt DateTime @default(now())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([key])
+}
+
+model Invoice {
+  id         String   @id @default(cuid())
+  invoiceNo  String   @unique
+  amount     Float
+  commission Float
+  netAmount  Float
+  period     String   // e.g. "2024-01" or "2024-W03"
+  status     String   @default("pending") // pending, paid
+  createdAt  DateTime @default(now())
+
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([invoiceNo])
+}
+
+model CannedResponse {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  category  String   @default("general")
+  createdAt DateTime @default(now())
+
+  @@index([category])
+}
+
+model Banner {
+  id         String   @id @default(cuid())
+  title      String
+  imageUrl   String
+  linkUrl    String?
+  position   String   @default("top") // top, bottom, sidebar
+  active     Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  startsAt   DateTime?
+  expiresAt  DateTime?
+  deletedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([active])
+  @@index([position])
+}
+
+model ScheduledAnnouncement {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  type      String   @default("info") // info, urgent, coupon, maintenance
+  target    String   @default("all") // all, buyers, vendors
+  active    Boolean  @default(true)
+  startsAt  DateTime?
+  expiresAt DateTime?
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([active])
+}
+
+model BulkCart {
+  id         String   @id @default(cuid())
+  quantity   Int      @default(1)
+  createdAt  DateTime @default(now())
+
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+
+  @@unique([userId, productId])
+  @@index([userId])
+}
+
+model VendorMessage {
+  id        String   @id @default(cuid())
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  senderId   String
+  sender     User     @relation("VendorMsgSender", fields: [senderId], references: [id])
+  receiverId String
+  receiver   User     @relation("VendorMsgReceiver", fields: [receiverId], references: [id])
+
+  @@index([senderId])
+  @@index([receiverId])
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  url       String
+  event     String   // deposit, purchase, withdrawal, etc.
+  secret    String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([event])
 }

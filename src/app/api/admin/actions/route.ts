@@ -287,7 +287,7 @@ export async function POST(req: Request) {
       }
       case "delete_coupon": {
         const couponId = String(body.couponId ?? "");
-        await prisma.coupon.deleteMany({ where: { id: couponId } });
+        await prisma.coupon.updateMany({ where: { id: couponId }, data: { deletedAt: new Date() } });
         return NextResponse.json({ success: true });
       }
       default:

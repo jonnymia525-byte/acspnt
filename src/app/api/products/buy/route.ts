@@ -68,7 +68,9 @@ export async function POST(req: Request) {
     const deliveredAccounts = accountLines.slice(0, quantity).join("\n");
     const remainingAccounts = accountLines.slice(quantity).join("\n");
     const newStock = product.stock - quantity;
-    const vendorPayout = Math.round(product.vendorPrice * quantity * 100) / 100;
+    const commissionPct = parseFloat((await prisma.setting.findUnique({ where: { key: "platform_commission_pct" } }))?.value || "15");
+    const commissionAmount = Math.round(total * (commissionPct / 100) * 100) / 100;
+    const vendorEarning = Math.round((total - commissionAmount) * 100) / 100;
 
     const alreadyUsedCoupon = coupon
       ? await prisma.usedCoupon.findUnique({ where: { userId_couponId: { userId: user.id, couponId: coupon.id } } })
@@ -82,6 +84,9 @@ export async function POST(req: Request) {
           discount,
           couponCode: couponCode || null,
           total,
+          commissionAmount,
+          vendorEarning,
+          platformFee: commissionAmount,
           accounts: deliveredAccounts,
           status: "completed",
           buyerId: user.id,
@@ -89,7 +94,7 @@ export async function POST(req: Request) {
         },
       }),
       prisma.user.update({ where: { id: user.id }, data: { balance: { decrement: total } } }),
-      prisma.user.update({ where: { id: product.vendorId }, data: { balance: { increment: vendorPayout } } }),
+      prisma.user.update({ where: { id: product.vendorId }, data: { balance: { increment: vendorEarning } } }),
       prisma.product.update({
         where: { id: product.id },
         data: { stock: { decrement: quantity }, accountsData: remainingAccounts },
@@ -98,7 +103,10 @@ export async function POST(req: Request) {
         data: { type: "purchase", amount: -total, description: `Purchased ${quantity}× ${product.title}`, userId: user.id },
       }),
       prisma.transaction.create({
-        data: { type: "sale", amount: vendorPayout, description: `Sale: ${product.title}`, userId: product.vendorId },
+        data: { type: "sale", amount: vendorEarning, description: `Sale: ${product.title} (after ${commissionPct}% commission)`, userId: product.vendorId },
+      }),
+      prisma.transaction.create({
+        data: { type: "commission", amount: commissionAmount, description: `Platform commission: ${product.title}`, userId: product.vendorId },
       }),
       prisma.notification.create({
         data: { title: "Purchase complete", message: `Order for ${product.title} delivered. ${money(total)} deducted.`, type: "success", userId: user.id },
@@ -131,6 +139,31 @@ export async function POST(req: Request) {
 
     const results = await prisma.$transaction(ops);
     const purchaseId = (results[0] as { id: string }).id;
+
+    // Notify restock subscribers if stock is now 0
+    if (newStock <= 0) {
+      const restockNotifs = await prisma.restockNotification.findMany({
+        where: { productId: product.id, status: "pending" },
+      });
+      for (const rn of restockNotifs) {
+        await prisma.notification.create({
+          data: { title: "Product Sold Out", message: `${product.title} is now out of stock`, type: "info", userId: rn.userId },
+        });
+        await prisma.restockNotification.update({ where: { id: rn.id }, data: { status: "notified" } });
+      }
+    }
+
+    // Update vendor stats
+    await prisma.user.update({
+      where: { id: product.vendorId },
+      data: { vendorSalesCount: { increment: quantity } },
+    });
+
+    // Update product view/sales stats
+    await prisma.product.update({
+      where: { id: product.id },
+      data: { totalSales: { increment: quantity } },
+    });
 
     try {
       await sendEmail({

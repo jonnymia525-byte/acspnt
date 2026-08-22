@@ -95,10 +95,10 @@ export async function POST(req: Request) {
     }
 
     case "delete": {
-      // Notify vendor
+      // Soft delete
       await prisma.notification.create({ data: { userId: product.vendorId, title: "Product Removed", message: `Your product "${product.title}" has been removed by admin.` } });
       await prisma.activityLog.create({ data: { action: "product_deleted", description: `Admin deleted "${product.title}"`, userId: admin.id } });
-      await prisma.product.delete({ where: { id: productId } });
+      await prisma.product.update({ where: { id: productId }, data: { deletedAt: new Date(), visible: false, status: "deleted" } });
       return NextResponse.json({ success: true });
     }
 

@@ -2,13 +2,14 @@ import { prisma } from "@/lib/prisma";
 import { platformColor, platformIcon, platformLabel } from "@/lib/totp";
 import { StorefrontClient } from "@/components/accs/storefront-client";
 import { PageRouter } from "@/components/accs/page-router";
-
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 export default async function HomePage() {
+  const isAdmin = false;
+
   const [listings] = await Promise.all([
     prisma.listing.findMany({
-      where: { visible: true },
+      where: isAdmin ? {} : { visible: true },
       include: {
         products: {
           where: { status: "approved", visible: true },
@@ -120,6 +121,7 @@ export default async function HomePage() {
         totalListings={totalListings}
         totalPlatforms={platforms.length}
         totalStock={totalStock}
+        isAdmin={isAdmin}
       />
     </PageRouter>
   );

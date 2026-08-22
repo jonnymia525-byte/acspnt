@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { money } from "@/lib/money";
 import { platformLabel } from "@/lib/totp";
+import { AdminSettings as AdminSettingsWidget } from "@/components/accs/widgets/admin-settings";
 
 interface User {
   id: string; username: string; email: string; name: string; role: string;
@@ -51,7 +52,8 @@ interface UserDetail extends User {
   disputes: Array<{ id: string; reason: string; status: string; resolution: string | null; createdAt: string }>;
 }
 
-const TABS = ["overview", "users", "vendors", "products", "orders", "withdrawals", "coupons", "deposits", "notices", "activity", "sales"];
+const TABS = ["overview", "users", "vendors", "products", "orders", "withdrawals", "coupons", "deposits", "notices", "activity", "sales", "recycle-bin", "settings"];
+const TAB_LABELS: Record<string, string> = { "overview": "Overview", "users": "Users", "vendors": "Vendors", "products": "Products", "orders": "Orders", "withdrawals": "Withdrawals", "coupons": "Coupons", "deposits": "Deposits", "notices": "Notices", "activity": "Activity", "sales": "Sales", "recycle-bin": "Recycle Bin", "settings": "Settings" };
 
 interface ListingItem {
   id: string; title: string; platform: string; category: string;
@@ -177,6 +179,7 @@ export function AdminDashboard() {
   // Detail panels
   const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [detailTab, setDetailTab] = useState("overview");
 
   // Edit modal
   const [editUser, setEditUser] = useState<User | null>(null);
@@ -246,6 +249,40 @@ export function AdminDashboard() {
   const [salesPeriod, setSalesPeriod] = useState("7d");
   const [salesData, setSalesData] = useState<any>(null);
 
+  // Settings
+  const [siteSettings, setSiteSettings] = useState<Record<string, string>>({});
+  const [loadingSettings, setLoadingSettings] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  // Recycle Bin
+  const [recycleBin, setRecycleBin] = useState<Record<string, any[]>>({});
+  const [recycleType, setRecycleType] = useState("all");
+  const [loadingRecycle, setLoadingRecycle] = useState(false);
+
+  const fetchSettings = async () => {
+    setLoadingSettings(true);
+    try {
+      const res = await fetch("/api/admin/settings");
+      const d = await res.json();
+      setSiteSettings(d.settings || {});
+    } catch {}
+    setLoadingSettings(false);
+  };
+
+  const saveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: siteSettings }),
+      });
+      const r = await res.json();
+      if (r.success) { alert("Settings saved!"); loadAll(); } else alert(r.error || "Failed");
+    } catch { alert("Failed to save settings"); }
+    setSavingSettings(false);
+  };
+
   const fetchSalesOverview = async (period: string) => {
     setSalesPeriod(period);
     try {
@@ -277,6 +314,32 @@ export function AdminDashboard() {
   };
 
   useEffect(() => { loadAll(); }, []);
+  useEffect(() => { if (tab === "settings") fetchSettings(); }, [tab]);
+
+  // Recycle bin
+  const fetchRecycleBin = async (type?: string) => {
+    setLoadingRecycle(true);
+    try {
+      const url = type && type !== "all" ? `/api/admin/recycle-bin?type=${type}` : "/api/admin/recycle-bin";
+      const res = await fetch(url);
+      const d = await res.json();
+      setRecycleBin(d.items || {});
+    } catch {}
+    setLoadingRecycle(false);
+  };
+  useEffect(() => { if (tab === "recycle-bin") fetchRecycleBin(recycleType); }, [tab, recycleType]);
+
+  const handleRecycleAction = async (action: string, type: string, id: string) => {
+    try {
+      const res = await fetch("/api/admin/recycle-bin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, type, id }),
+      });
+      const d = await res.json();
+      if (d.success) fetchRecycleBin(recycleType);
+    } catch {}
+  };
 
   // Filter helpers — users tab shows only buyers, vendors tab shows only sellers
   const filteredUsers = users.filter(u =>
@@ -364,7 +427,7 @@ export function AdminDashboard() {
       <div className="wrap" style={{ paddingTop: 16, paddingBottom: 16 }}>
         {/* Mobile Tabs */}
         <div className="show-mobile" style={{ width: "100%", gap: 4, padding: "0 0 12px", overflowX: "auto" }}>
-          {TABS.map(t => <button key={t} onClick={() => setTab(t)} className={`btn btn-sm ${tab === t ? "btn-primary" : "btn-secondary"}`}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>)}
+          {TABS.map(t => <button key={t} onClick={() => setTab(t)} className={`btn btn-sm ${tab === t ? "btn-primary" : "btn-secondary"}`}>{TAB_LABELS[t] || t}</button>)}
         </div>
 
         <div style={{ display: "flex", gap: 16 }}>
@@ -373,7 +436,7 @@ export function AdminDashboard() {
             <div style={{ padding: "12px 16px", borderBottom: "1px solid #333" }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>Admin Panel</div>
             </div>
-            {TABS.map(t => <div key={t} className={`side-item ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</div>)}
+            {TABS.map(t => <div key={t} className={`side-item ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>{TAB_LABELS[t] || t}</div>)}
           </div>
 
           {/* Content */}
@@ -410,43 +473,31 @@ export function AdminDashboard() {
             {tab === "users" && !selectedUser && (
               <>
                 <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-                  <input type="text" placeholder="Search users by name, username, email..." value={search} onChange={e => setSearch(e.target.value)} className="input" style={{ flex: 1 }} />
+                  <input type="text" placeholder="Search by name, email, or username..." value={search} onChange={e => setSearch(e.target.value)} className="input" style={{ flex: 1 }} />
                   <span style={{ fontSize: 12, color: "#888" }}>{filteredUsers.length} users</span>
                 </div>
                 <div className="panel">
-                  <div className="panel-head">All Users ({filteredUsers.length})</div>
-                  <div style={{ overflowX: "auto" }}>
-                    <table className="tbl">
-                      <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Balance</th><th>Registered</th><th>Status</th><th>Actions</th></tr></thead>
-                      <tbody>
-                        {filteredUsers.map(u => (
-                          <tr key={u.id} style={{ cursor: "pointer" }} onClick={() => loadUserDetail(u.id)}>
-                            <td style={{ fontWeight: 600 }}>{u.name || u.username}</td>
-                            <td style={{ fontSize: 12 }}>{u.email}</td>
-                            <td><span className={`badge badge-${u.role === "admin" ? "approved" : u.role === "vendor" ? "pending" : ""}`}>{u.role}</span></td>
-                            <td style={{ fontWeight: 600, color: "#3ea136" }}>{money(u.balance)}</td>
-                            <td style={{ fontSize: 11 }}>{new Date(u.registeredAt).toLocaleDateString()}</td>
-                            <td>
-                              {u.blocked ? (
-                                <span className="badge badge-rejected">Blocked</span>
-                              ) : u.muted ? (
-                                <span className="badge badge-pending" title={u.mutedUntil ? `Until ${new Date(u.mutedUntil).toLocaleDateString()}` : "Permanent"}>Muted{u.mutedUntil ? ` ${(Math.ceil((new Date(u.mutedUntil).getTime() - Date.now()) / 86400000))}d` : " perm"}</span>
-                              ) : (
-                                <span className="badge badge-approved">Active</span>
-                              )}
-                            </td>
-                            <td onClick={e => e.stopPropagation()}>
-                              <div style={{ display: "flex", gap: 4 }}>
-                                <button className="btn btn-secondary btn-sm" onClick={() => { setEditUser(u); setEditName(u.name); setEditUsername(u.username); setEditEmail(u.email); setEditBalance(String(u.balance)); setEditRole(u.role); setEditPassword(""); }}>Edit</button>
-                                <button className="btn btn-primary btn-sm" onClick={() => { setTopupUser(u); setTopupAmount(""); }}>Topup</button>
-                                <button className="btn btn-secondary btn-sm" onClick={() => { setMsgUser(u); setMsgTitle(""); setMsgBody(""); }}>Msg</button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="panel-head" style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr 80px 90px", gap: 12, padding: "8px 16px", fontSize: 11, color: "#999", fontWeight: 600, textTransform: "uppercase" }}>
+                    <span>User</span>
+                    <span>Email</span>
+                    <span>Role</span>
+                    <span style={{ textAlign: "right" }}>Balance</span>
+                    <span style={{ textAlign: "right" }}>Joined</span>
                   </div>
+                  {filteredUsers.length === 0 && <div style={{ padding: 20, color: "#888", fontSize: 12, textAlign: "center" }}>No users found</div>}
+                  {filteredUsers.map(u => (
+                    <div key={u.id} style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr 80px 90px", gap: 12, padding: "10px 16px", borderBottom: "1px solid #f0f0f0", alignItems: "center", cursor: "pointer", transition: "background 0.15s" }} className="row" onMouseEnter={e => (e.currentTarget.style.background = "#f9f9f9")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")} onClick={() => loadUserDetail(u.id)}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: "#1a73e8", textDecoration: "underline" }}>{u.name || u.username}</div>
+                      <div style={{ fontSize: 12, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email}</div>
+                      <div>
+                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, fontWeight: 600, background: u.blocked ? "#fde8e8" : u.muted ? "#fff3cd" : "#e8f5e9", color: u.blocked ? "#c62828" : u.muted ? "#856404" : "#2e7d32" }}>
+                          {u.blocked ? "Blocked" : u.muted ? "Muted" : "Active"}
+                        </span>
+                      </div>
+                      <div style={{ textAlign: "right", fontWeight: 600, color: "#3ea136", fontSize: 12 }}>{money(u.balance)}</div>
+                      <div style={{ textAlign: "right", fontSize: 11, color: "#aaa" }}>{new Date(u.registeredAt).toLocaleDateString()}</div>
+                    </div>
+                  ))}
                 </div>
               </>
             )}
@@ -454,7 +505,7 @@ export function AdminDashboard() {
             {/* User Detail Panel */}
             {tab === "users" && selectedUser && (
               <div>
-                <button onClick={() => setSelectedUser(null)} className="btn btn-secondary btn-sm" style={{ marginBottom: 12 }}>&larr; Back to Users</button>
+                <button onClick={() => { setSelectedUser(null); setDetailTab("overview"); }} className="btn btn-secondary btn-sm" style={{ marginBottom: 12 }}>&larr; Back</button>
                 <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                   <div className="panel" style={{ flex: 1, minWidth: 200, padding: 16 }}>
                     <div style={{ fontSize: 16, fontWeight: 700 }}>{selectedUser.name}</div>
@@ -482,20 +533,57 @@ export function AdminDashboard() {
                   </div>
                 </div>
                 {/* User activity tabs */}
-                {(["Purchases", "Deposits", "Withdrawals", "Products", "Reviews", "Disputes", "Messages", "Activity Log"] as const).map(section => {
-                  const key = section.toLowerCase().replace(" ", "");
+                <div style={{ display: "flex", gap: 4, overflowX: "auto", marginBottom: 12, paddingBottom: 4 }}>
+                  {(["overview", "purchases", "deposits", "withdrawals", "products", "reviews", "disputes", "messages", "activity"] as const).map(tab => {
+                    const dataMap: Record<string, any[]> = {
+                      purchases: selectedUser.purchases, deposits: selectedUser.deposits,
+                      withdrawals: selectedUser.withdrawals, products: selectedUser.products,
+                      reviews: selectedUser.reviews, disputes: selectedUser.disputes,
+                      messages: selectedUser.sentMessages, activity: selectedUser.activityLogs,
+                    };
+                    const count = dataMap[tab]?.length || 0;
+                    return (
+                      <button key={tab} onClick={() => setDetailTab(tab)} style={{
+                        padding: "5px 12px", borderRadius: 16, border: "none", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer",
+                        background: detailTab === tab ? "#3ea136" : "#f0f0f0",
+                        color: detailTab === tab ? "#fff" : "#666",
+                      }}>{tab.charAt(0).toUpperCase() + tab.slice(1)}{count > 0 ? ` (${count})` : ""}</button>
+                    );
+                  })}
+                </div>
+                {(() => {
                   const dataMap: Record<string, any[]> = {
                     purchases: selectedUser.purchases, deposits: selectedUser.deposits,
                     withdrawals: selectedUser.withdrawals, products: selectedUser.products,
                     reviews: selectedUser.reviews, disputes: selectedUser.disputes,
-                    messages: selectedUser.sentMessages, activitylog: selectedUser.activityLogs,
+                    messages: selectedUser.sentMessages, activity: selectedUser.activityLogs,
                   };
-                  const items = dataMap[key] || [];
+                  const items = dataMap[detailTab] || [];
+                  if (detailTab === "overview") {
+                    const stats = [
+                      { l: "Purchases", v: selectedUser.purchases?.length || 0, c: "#333" },
+                      { l: "Deposits", v: selectedUser.deposits?.length || 0, c: "#333" },
+                      { l: "Withdrawals", v: selectedUser.withdrawals?.length || 0, c: "#333" },
+                      { l: "Products", v: selectedUser.products?.length || 0, c: "#333" },
+                      { l: "Reviews", v: selectedUser.reviews?.length || 0, c: "#333" },
+                      { l: "Disputes", v: selectedUser.disputes?.length || 0, c: "#333" },
+                    ];
+                    return (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
+                        {stats.map(s => (
+                          <div key={s.l} className="panel" style={{ padding: 12, textAlign: "center" }}>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: s.c }}>{s.v}</div>
+                            <div style={{ fontSize: 11, color: "#888" }}>{s.l}</div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
                   return (
-                    <div key={section} className="panel" style={{ marginBottom: 12 }}>
-                      <div className="panel-head">{section} ({items.length})</div>
+                    <div className="panel">
+                      <div className="panel-head">{detailTab.charAt(0).toUpperCase() + detailTab.slice(1)} ({items.length})</div>
                       {items.length === 0 ? <div style={{ padding: 16, color: "#888", fontSize: 12, textAlign: "center" }}>No data</div> :
-                        items.slice(0, 10).map((item: any) => (
+                        items.slice(0, 20).map((item: any) => (
                           <div key={item.id} className="row" style={{ fontSize: 12 }}>
                             <div style={{ flex: 1 }}>
                               <div style={{ fontWeight: 600 }}>{item.title || item.description || item.action || item.reason || item.method || item.comment || "—"}</div>
@@ -513,7 +601,7 @@ export function AdminDashboard() {
                       }
                     </div>
                   );
-                })}
+                })()}
               </div>
             )}
 
@@ -521,41 +609,54 @@ export function AdminDashboard() {
             {tab === "vendors" && !selectedUser && (
               <>
                 <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-                  <input type="text" placeholder="Search vendors..." value={search} onChange={e => setSearch(e.target.value)} className="input" style={{ flex: 1 }} />
+                  <input type="text" placeholder="Search vendors by name, email, or username..." value={search} onChange={e => setSearch(e.target.value)} className="input" style={{ flex: 1 }} />
+                  <span style={{ fontSize: 12, color: "#888" }}>{filteredVendors.length} vendors</span>
                 </div>
+
+                {/* Pending Requests */}
+                {vendorRequests.length > 0 && (
+                  <div className="panel" style={{ marginBottom: 12 }}>
+                    <div className="panel-head" style={{ background: "#fff3cd" }}>⏳ Pending Vendor Requests ({vendorRequests.length})</div>
+                    {vendorRequests.map(vr => (
+                      <div key={vr.id} className="row" style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 12, alignItems: "center" }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: "#1a73e8", textDecoration: "underline", cursor: "pointer" }} onClick={() => loadUserDetail(vr.userId)}>{vr.firstName} {vr.lastName}</div>
+                          <div style={{ fontSize: 11, color: "#888" }}>@{vr.user.username} · {vr.email}</div>
+                        </div>
+                        <button className="btn btn-primary btn-sm" onClick={async () => {
+                          const muteDays = prompt("Approve vendor. Mute for how many days? (0 = no mute)");
+                          const md = parseInt(muteDays || "0");
+                          await fetch("/api/admin/actions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve_vendor", requestId: vr.id, userId: vr.userId }) });
+                          if (md > 0) { await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "set_mute", userId: vr.userId, muteDays: md }) }); }
+                          loadAll();
+                        }}>✓ Approve</button>
+                        <button className="btn btn-danger btn-sm" onClick={() => { setVrRejectId(vr.id); setVrRejectReason(""); setVrMuteDays(0); }}>✗ Reject</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* All Vendors */}
                 <div className="panel">
-                  <div className="panel-head">Vendor Requests</div>
-                  {vendorRequests.length === 0 ? <div style={{ padding: 16, color: "#888", fontSize: 12, textAlign: "center" }}>No pending requests</div> :
-                    vendorRequests.map(vr => (
-                      <div key={vr.id} className="row">
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 600 }}>{vr.firstName} {vr.lastName} ({vr.user.username})</div>
-                          <div style={{ fontSize: 11, color: "#888" }}>{vr.email} · {vr.productDetails.substring(0, 100)}...</div>
-                        </div>
-                        <div style={{ display: "flex", gap: 4 }}>
-                          <button className="btn btn-primary btn-sm" onClick={async () => {
-                            const muteDays = prompt("Approve vendor. Mute for how many days? (0 = no mute)");
-                            const md = parseInt(muteDays || "0");
-                            await fetch("/api/admin/actions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve_vendor", requestId: vr.id, userId: vr.userId }) });
-                            if (md > 0) { await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "set_mute", userId: vr.userId, muteDays: md }) }); }
-                            loadAll();
-                          }}>Approve</button>
-                          <button className="btn btn-danger btn-sm" onClick={() => { setVrRejectId(vr.id); setVrRejectReason(""); setVrMuteDays(0); }}>Reject</button>
-                        </div>
-                      </div>
-                    ))
-                  }
-                </div>
-                <div className="panel" style={{ marginTop: 12 }}>
-                  <div className="panel-head">All Vendors ({filteredVendors.length})</div>
+                  <div className="panel-head" style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr 80px 90px", gap: 12, padding: "8px 16px", fontSize: 11, color: "#999", fontWeight: 600, textTransform: "uppercase" }}>
+                    <span>Vendor</span>
+                    <span>Email</span>
+                    <span>Status</span>
+                    <span style={{ textAlign: "right" }}>Balance</span>
+                    <span style={{ textAlign: "right" }}>Joined</span>
+                  </div>
+                  {filteredVendors.length === 0 && <div style={{ padding: 20, color: "#888", fontSize: 12, textAlign: "center" }}>No vendors found</div>}
                   {filteredVendors.map(u => (
-                    <div key={u.id} className="row" style={{ cursor: "pointer" }} onClick={() => loadUserDetail(u.id)}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600 }}>{u.name || u.username}</div>
-                        <div style={{ fontSize: 11, color: "#888" }}>{u.email}</div>
+                    <div key={u.id} style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr 80px 90px", gap: 12, padding: "10px 16px", borderBottom: "1px solid #f0f0f0", alignItems: "center", cursor: "pointer", transition: "background 0.15s" }} className="row" onMouseEnter={e => (e.currentTarget.style.background = "#f9f9f9")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")} onClick={() => loadUserDetail(u.id)}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: "#1a73e8", textDecoration: "underline" }}>{u.name || u.username}</div>
+                      <div style={{ fontSize: 12, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email}</div>
+                      <div>
+                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, fontWeight: 600, background: u.vendorStatus === "approved" ? "#e8f5e9" : u.vendorStatus === "pending" ? "#fff3cd" : "#fde8e8", color: u.vendorStatus === "approved" ? "#2e7d32" : u.vendorStatus === "pending" ? "#856404" : "#c62828" }}>
+                          {u.vendorStatus}
+                        </span>
                       </div>
-                      <span className={`badge badge-${u.vendorStatus}`}>{u.vendorStatus}</span>
-                      <span style={{ fontWeight: 600, color: "#3ea136", marginLeft: 8 }}>{money(u.balance)}</span>
+                      <div style={{ textAlign: "right", fontWeight: 600, color: "#3ea136", fontSize: 12 }}>{money(u.balance)}</div>
+                      <div style={{ textAlign: "right", fontSize: 11, color: "#aaa" }}>{new Date(u.registeredAt).toLocaleDateString()}</div>
                     </div>
                   ))}
                 </div>
@@ -1194,6 +1295,78 @@ export function AdminDashboard() {
           </div>
         </div>
       </div>
+
+      {/* ==================== RECYCLE BIN ==================== */}
+      {tab === "recycle-bin" && (
+        <div className="panel">
+          <div className="panel-head">
+            <span>🗑️ Recycle Bin</span>
+          </div>
+          <div style={{ padding: 12 }}>
+            {/* Filter tabs */}
+            <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+              {["all", "products", "listings", "coupons", "banners", "announcements"].map(t => (
+                <button key={t} onClick={() => setRecycleType(t)} className={`btn btn-sm ${recycleType === t ? "btn-primary" : "btn-secondary"}`}>
+                  {t.charAt(0).toUpperCase() + t.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            {loadingRecycle ? (
+              <div style={{ color: "#888", fontSize: 12, padding: 20, textAlign: "center" }}>Loading...</div>
+            ) : (
+              <>
+                {Object.entries(recycleBin).map(([type, items]) => (
+                  items.length > 0 && (
+                    <div key={type} style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#ccc", marginBottom: 8, textTransform: "capitalize" }}>
+                        {type} ({items.length})
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {items.map((item: any) => (
+                          <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#2a2a2a", borderRadius: 6, border: "1px solid #333" }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 500, color: "#eee", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {item.title || item.code || item.name || item.id}
+                              </div>
+                              <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>
+                                Deleted {item.deletedAt ? new Date(item.deletedAt).toLocaleDateString() : ""}
+                                {item.listing ? ` • From: ${item.listing.title}` : ""}
+                                {item.vendor ? ` • By: ${item.vendor.username}` : ""}
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                              <button onClick={() => handleRecycleAction("restore", type, item.id)} className="btn btn-sm" style={{ background: "#22c55e", color: "#fff", border: "none" }}>♻️ Restore</button>
+                              <button onClick={() => { if (window.confirm("Permanently delete this item?")) handleRecycleAction("permanent_delete", type, item.id); }} className="btn btn-sm" style={{ background: "#ef4444", color: "#fff", border: "none" }}>🗑️ Delete</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                ))}
+                {Object.values(recycleBin).every((items: any[]) => items.length === 0) && (
+                  <div style={{ color: "#888", fontSize: 12, padding: 20, textAlign: "center" }}>Recycle bin is empty</div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ==================== SETTINGS ==================== */}
+      {tab === "settings" && (
+        <>
+          <div className="panel" style={{ marginBottom: 12 }}>
+            <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>⚙️ Site Settings</span>
+            </div>
+            <div style={{ padding: 16 }}>
+              <AdminSettingsWidget />
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ==================== MODALS ==================== */}
 

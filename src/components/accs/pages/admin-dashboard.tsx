@@ -18,6 +18,7 @@ interface Product {
   vendorPrice: number; storePrice: number; stock: number; status: string;
   deliveryFormat: string; countryRegister: string; originalMail: boolean;
   country: string; createdAt: string; accountsData?: string;
+  listingId?: string;
   vendor: { id: string; username: string; name: string; vendorStatus: string };
   isDuplicate?: boolean;
   purchases?: Array<{ id: string; quantity: number; total: number; status: string; createdAt: string; buyer: { id: string; username: string } }>;
@@ -259,6 +260,9 @@ export function AdminDashboard() {
   const [recycleType, setRecycleType] = useState("all");
   const [loadingRecycle, setLoadingRecycle] = useState(false);
 
+  // Listing visibility tracking
+  const [listingVisibility, setListingVisibility] = useState<Record<string, boolean>>({});
+
   const fetchSettings = async () => {
     setLoadingSettings(true);
     try {
@@ -338,6 +342,21 @@ export function AdminDashboard() {
       });
       const d = await res.json();
       if (d.success) fetchRecycleBin(recycleType);
+    } catch {}
+  };
+
+  const toggleListingVisibility = async (listingId: string) => {
+    try {
+      const res = await fetch("/api/admin/listings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "toggle_visible", listingId }),
+      });
+      const r = await res.json();
+      if (r.success) {
+        setListingVisibility(prev => ({ ...prev, [listingId]: !prev[listingId] }));
+        loadAll();
+      }
     } catch {}
   };
 
@@ -779,6 +798,24 @@ export function AdminDashboard() {
                               }
                             }}>✅ Approve All Pending</button>
                           )}
+                          {/* Visibility toggle */}
+                          {(() => {
+                            const lid = groupProducts[0]?.listingId;
+                            if (!lid) return null;
+                            const isVisible = listingVisibility[lid] !== undefined ? listingVisibility[lid] : true;
+                            return (
+                              <button
+                                className="btn btn-sm"
+                                style={{ background: isVisible ? '#3ea136' : '#ff9800', color: '#fff', border: 'none' }}
+                                onClick={() => {
+                                  const action = isVisible ? 'Hide' : 'Unhide';
+                                  if (confirm(`${action} listing \"${title}\" for users and vendors? Admin can always see it.`)) {
+                                    toggleListingVisibility(lid);
+                                  }
+                                }}
+                              >{isVisible ? '🙈 Hide' : '👁 Unhide'}</button>
+                            );
+                          })()}
                         </div>
 
                         {/* Expanded content */}

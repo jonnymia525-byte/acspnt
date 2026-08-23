@@ -333,7 +333,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
                 {/* Header */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #eee" }}>
                   <span style={{ fontSize: 13, fontWeight: 700, color: "#333" }}>🔔 Notifications {notifTotal > 0 && `(${notifTotal})`}</span>
-                  {notifTotal > 0 && <button onClick={async () => { await fetch('/api/notifications?markRead=all'); setNotifTotal(0); setNotifSections([]); setNotifGrouped({}); }} style={{ background: "none", border: "none", color: "#1976d2", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>Mark All Read</button>}
+                  {notifTotal > 0 && <button onClick={async () => { await fetch('/api/notifications?markRead=all'); setNotifTotal(0); setNotifSections([]); setNotifGrouped({}); setExpandedSections(new Set()); }} style={{ background: "none", border: "none", color: "#1976d2", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>Mark All Read</button>}
                 </div>
                 {notifTotal === 0 ? (
                   <div style={{ padding: 24, textAlign: "center", color: "#aaa", fontSize: 12 }}>No new notifications</div>

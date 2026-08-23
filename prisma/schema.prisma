@@ -134,6 +134,13 @@ model Product {
   avgResponseTime   Float?
   deletedAt         DateTime?
 
+  // Merge system: tracks which "master" product this was cloned from
+  parentProductId  String?
+  parentProduct   Product?  @relation("MergeChildren", fields: [parentProductId], references: [id])
+  mergedChildren  Product[] @relation("MergeChildren")
+  isMerged        Boolean  @default(false)
+  mergeGroup      String?  // groups merged products together
+
   listingId       String?
   listing         Listing?  @relation(fields: [listingId], references: [id])
   vendorId        String

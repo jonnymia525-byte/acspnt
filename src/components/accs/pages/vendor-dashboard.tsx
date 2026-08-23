@@ -61,6 +61,14 @@ export function VendorDashboard() {
   const [dupes, setDupes] = useState<Array<{ line: string; index: number; productId?: string; productTitle?: string }>>([]);
   const [checkingDupes, setCheckingDupes] = useState(false);
 
+  // Similar products / duplicate detection
+  const [similarProducts, setSimilarProducts] = useState<Array<{ id: string; title: string; platform: string; category: string; storePrice: number; vendorPrice: number; stock: number; totalSales: number; avgRating: number; reviewCount: number; vendor: { id: string; username: string; vendorRating: number } }>>([]);
+  const [similarLoading, setSimilarLoading] = useState(false);
+  const [showDuplicatePopup, setShowDuplicatePopup] = useState(false);
+  const [claimingProduct, setClaimingProduct] = useState<string | null>(null);
+  const [claimPrice, setClaimPrice] = useState("");
+  const [claiming, setClaiming] = useState(false);
+
   // Withdrawal
   const [wdNetwork, setWdNetwork] = useState("bep20");
   const [wdAmount, setWdAmount] = useState("");
@@ -133,6 +141,48 @@ export function VendorDashboard() {
     );
   }
 
+  // Fetch similar products when platform or category changes
+  const fetchSimilar = async () => {
+    setSimilarLoading(true);
+    try {
+      const res = await fetch(`/api/vendor/products/similar?platform=${newPlat}&category=${newCat}`);
+      const r = await res.json();
+      setSimilarProducts(r.products || []);
+    } catch { setSimilarProducts([]); }
+    setSimilarLoading(false);
+  };
+
+  useEffect(() => {
+    if (tab === "add-listing") fetchSimilar();
+  }, [tab, newPlat, newCat]);
+
+  // Claim an existing product (use existing)
+  const claimProduct = async (productId: string) => {
+    const price = prompt("Enter your vendor price ($):" , "10");
+    if (!price) return;
+    const vp = parseFloat(price);
+    if (!vp || vp <= 0) { alert("Invalid price"); return; }
+    setClaimingProduct(productId);
+    setClaiming(true);
+    try {
+      const res = await fetch("/api/vendor/products/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productId, vendorPrice: vp }),
+      });
+      const r = await res.json();
+      if (r.success) {
+        alert("Product added to your store! Upload your accounts and wait for admin approval.");
+        refresh();
+        setSimilarProducts(prev => prev.filter(p => p.id !== productId));
+      } else {
+        alert(r.error || "Failed to claim product");
+      }
+    } catch { alert("Network error"); }
+    setClaiming(false);
+    setClaimingProduct(null);
+  };
+
   const createProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     // Validate delivery format: must be colon-separated alphanumeric names
@@ -140,9 +190,15 @@ export function VendorDashboard() {
       alert("Delivery format must use colon-separated names (e.g. name:pass:email:emailpass:gender)");
       return;
     }
-    const res = await fetch("/api/vendor/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle, platform: newPlat, category: newCat, description: newDesc, vendorPrice: parseFloat(newPrice), countryRegister: newCountry, deliveryFormat: newFormat.trim(), originalMail: newOriginalMail }) });
+    // Auto-duplicate check: if similar products exist, show popup first
+    if (similarProducts.length > 0 && !showDuplicatePopup) {
+      setShowDuplicatePopup(true);
+      return;
+    }
+    setShowDuplicatePopup(false);
+    const res = await fetch("/api/vendor/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle || autoTitle, platform: newPlat, category: newCat, description: newDesc, vendorPrice: parseFloat(newPrice), countryRegister: newCountry, deliveryFormat: newFormat.trim(), originalMail: newOriginalMail }) });
     const r = await res.json();
-    if (r.success) { setNewTitle(""); setNewDesc(""); setNewPrice(""); setNewAccounts(""); setNewCountry(""); setNewFormat("email:pass"); alert("Listing created! Now upload your accounts."); setTab("my-products"); refresh(); } else alert(r.error);
+    if (r.success) { setNewTitle(""); setNewDesc(""); setNewPrice(""); setNewAccounts(""); setNewCountry(""); setNewFormat("email:pass"); setSimilarProducts([]); setShowDuplicatePopup(false); alert("Listing created! Now upload your accounts."); setTab("my-products"); refresh(); } else alert(r.error);
   };
 
   const uploadMore = async (e: React.FormEvent) => {
@@ -368,87 +424,173 @@ export function VendorDashboard() {
 
             {/* ADD LISTING */}
             {tab === "add-listing" && data.user.vendorStatus === "approved" && (
-              <div className="panel">
-                <div className="panel-head">Create New Listing</div>
-                <form onSubmit={createProduct} style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-                  {/* Step 1: Platform + Category */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                    <div>
-                      <label className="label">Platform *</label>
-                      <select value={newPlat} onChange={e => setNewPlat(e.target.value)} className="input">
-                        {PLATFORMS.map(p => <option key={p} value={p}>{platformLabel(p)}</option>)}
-                      </select>
+              <div style={{ display: 'grid', gridTemplateColumns: similarProducts.length > 0 ? '1fr 340px' : '1fr', gap: 16, alignItems: 'start' }}>
+                <div className="panel">
+                  <div className="panel-head">Create New Listing</div>
+                  <form onSubmit={createProduct} style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                    {/* Step 1: Platform + Category */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <div>
+                        <label className="label">Platform *</label>
+                        <select value={newPlat} onChange={e => setNewPlat(e.target.value)} className="input">
+                          {PLATFORMS.map(p => <option key={p} value={p}>{platformLabel(p)}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="label">Category *</label>
+                        <select value={newCat} onChange={e => setNewCat(e.target.value)} className="input">
+                          {CATEGORIES.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
+                        </select>
+                      </div>
                     </div>
-                    <div>
-                      <label className="label">Category *</label>
-                      <select value={newCat} onChange={e => setNewCat(e.target.value)} className="input">
-                        {CATEGORIES.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
-                      </select>
-                    </div>
-                  </div>
 
-                  {/* Step 2: Title + Description */}
-                  <div>
-                    <label className="label">Listing Title *</label>
-                    <input type="text" value={newTitle} onChange={e => setNewTitle(e.target.value)} className="input" required placeholder={autoTitle || "e.g. Instagram Fresh Account"} />
-                    <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>Suggested: {autoTitle}</div>
-                  </div>
-                  <div>
-                    <label className="label">Description *</label>
-                    <textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} className="input" rows={3} required minLength={10} maxLength={500} placeholder="Describe the account quality, age, features, what's included..." style={{ resize: "vertical" }} />
-                    <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>{newDesc.length}/500</div>
-                  </div>
-
-                  {/* Step 3: Price + Details */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {/* Step 2: Title + Description */}
                     <div>
-                      <label className="label">Your Price ($) *</label>
-                      <input type="number" step="0.01" min="0.01" value={newPrice} onChange={e => setNewPrice(e.target.value)} className="input" required />
-                      <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>Store price (+40%): <strong>{money(calcStorePrice(vp))}</strong></div>
+                      <label className="label">Listing Title *</label>
+                      <input type="text" value={newTitle} onChange={e => setNewTitle(e.target.value)} className="input" required placeholder={autoTitle || "e.g. Instagram Fresh Account"} />
+                      <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>Suggested: {autoTitle}</div>
                     </div>
                     <div>
-                      <label className="label">Country</label>
-                      <select value={newCountry} onChange={e => setNewCountry(e.target.value)} className="input">
-                        <option value="">Global</option>
-                        {["US","UK","AU","CA","DE","FR","JP","BR","IN","NG","PH","VN","ID","MX","ES","IT","NL","SE","NO","DK","PL","TR","UA","RU","KR"].map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
+                      <label className="label">Description *</label>
+                      <textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} className="input" rows={3} required minLength={10} maxLength={500} placeholder="Describe the account quality, age, features, what's included..." style={{ resize: "vertical" }} />
+                      <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>{newDesc.length}/500</div>
                     </div>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                    <div>
-                      <label className="label">Delivery Format <span style={{ fontSize: 10, color: '#888' }}>(colon-separated)</span></label>
-                      <input
-                        type="text"
-                        value={newFormat}
-                        onChange={e => setNewFormat(e.target.value)}
-                        placeholder="e.g. name:pass:email:emailpass:gender"
-                        className="input"
-                        style={{ fontFamily: 'monospace', fontSize: 13 }}
-                      />
-                      {newFormat && !/^([a-zA-Z0-9_]+)(:[a-zA-Z0-9_]+)*$/.test(newFormat) && (
-                        <p style={{ fontSize: 10, color: '#e53e3e', marginTop: 2 }}>
-                          Use colon-separated names only (e.g. name:pass:email:emailpass:gender)
-                        </p>
-                      )}
-                      {newFormat && /^([a-zA-Z0-9_]+)(:[a-zA-Z0-9_]+)*$/.test(newFormat) && (
-                        <p style={{ fontSize: 10, color: '#3ea136', marginTop: 2 }}>
-                          {newFormat.split(':').length} fields: {newFormat.split(':').join(' → ')}
-                        </p>
-                      )}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "end", paddingBottom: 2 }}>
-                      <label style={{ fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-                        <input type="checkbox" checked={newOriginalMail} onChange={e => setNewOriginalMail(e.target.checked)} /> Original email included
-                      </label>
-                    </div>
-                  </div>
 
-                  <div style={{ background: "#f0f7ff", border: "1px solid #b3d4fc", borderRadius: 6, padding: 12, fontSize: 12, color: "#1565c0" }}>
-                    After submitting, you will be able to upload account data from My Products.
-                  </div>
+                    {/* Step 3: Price + Details */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <div>
+                        <label className="label">Your Price ($) *</label>
+                        <input type="number" step="0.01" min="0.01" value={newPrice} onChange={e => setNewPrice(e.target.value)} className="input" required />
+                        <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>Store price (+40%): <strong>{money(calcStorePrice(vp))}</strong></div>
+                      </div>
+                      <div>
+                        <label className="label">Country</label>
+                        <select value={newCountry} onChange={e => setNewCountry(e.target.value)} className="input">
+                          <option value="">Global</option>
+                          {["US","UK","AU","CA","DE","FR","JP","BR","IN","NG","PH","VN","ID","MX","ES","IT","NL","SE","NO","DK","PL","TR","UA","RU","KR"].map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <div>
+                        <label className="label">Delivery Format <span style={{ fontSize: 10, color: '#888' }}>(colon-separated)</span></label>
+                        <input
+                          type="text"
+                          value={newFormat}
+                          onChange={e => setNewFormat(e.target.value)}
+                          placeholder="e.g. name:pass:email:emailpass:gender"
+                          className="input"
+                          style={{ fontFamily: 'monospace', fontSize: 13 }}
+                        />
+                        {newFormat && !/^([a-zA-Z0-9_]+)(:[a-zA-Z0-9_]+)*$/.test(newFormat) && (
+                          <p style={{ fontSize: 10, color: '#e53e3e', marginTop: 2 }}>
+                            Use colon-separated names only (e.g. name:pass:email:emailpass:gender)
+                          </p>
+                        )}
+                        {newFormat && /^([a-zA-Z0-9_]+)(:[a-zA-Z0-9_]+)*$/.test(newFormat) && (
+                          <p style={{ fontSize: 10, color: '#3ea136', marginTop: 2 }}>
+                            {newFormat.split(':').length} fields: {newFormat.split(':').join(' → ')}
+                          </p>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "end", paddingBottom: 2 }}>
+                        <label style={{ fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+                          <input type="checkbox" checked={newOriginalMail} onChange={e => setNewOriginalMail(e.target.checked)} /> Original email included
+                        </label>
+                      </div>
+                    </div>
 
-                  <button type="submit" className="btn btn-primary" style={{ width: "100%" }}>Create Listing</button>
-                </form>
+                    <div style={{ background: "#f0f7ff", border: "1px solid #b3d4fc", borderRadius: 6, padding: 12, fontSize: 12, color: "#1565c0" }}>
+                      After submitting, you will be able to upload account data from My Products.
+                    </div>
+
+                    <button type="submit" className="btn btn-primary" style={{ width: "100%" }}>
+                      {similarProducts.length > 0 ? "Review Similar Products & Create" : "Create Listing"}
+                    </button>
+                  </form>
+                </div>
+
+                {/* Similar Products Panel */}
+                {similarProducts.length > 0 && (
+                  <div className="panel" style={{ position: 'sticky', top: 80 }}>
+                    <div className="panel-head" style={{ background: '#fff3cd', color: '#856404' }}>
+                      ⚠️ Similar Products Found ({similarProducts.length})
+                    </div>
+                    <div style={{ fontSize: 12, color: '#856404', padding: '8px 16px', background: '#fff3cd', borderBottom: '1px solid #ffc107' }}>
+                      These products match your {platformLabel(newPlat)} {newCat} selection. Consider using an existing product instead of creating a duplicate.
+                    </div>
+                    <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+                      {similarProducts.map((sp) => (
+                        <div key={sp.id} style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 4 }}>
+                            <div style={{ fontWeight: 700, fontSize: 13 }}>{sp.title}</div>
+                            <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 3, background: '#e8f5e9', color: '#2e7d32' }}>
+                              ⭐ {sp.avgRating || 'N/A'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
+                            by <strong>{sp.vendor.username}</strong> · {sp.totalSales} sold · {sp.stock} in stock
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#3ea136' }}>{money(sp.storePrice)}</div>
+                            <button
+                              onClick={() => claimProduct(sp.id)}
+                              disabled={claiming && claimingProduct === sp.id}
+                              style={{
+                                background: claiming && claimingProduct === sp.id ? '#ccc' : '#007bff',
+                                color: '#fff', border: 'none', borderRadius: 4, padding: '6px 14px',
+                                fontSize: 12, fontWeight: 600, cursor: claiming ? 'wait' : 'pointer'
+                              }}
+                            >
+                              {claiming && claimingProduct === sp.id ? 'Adding...' : 'Use Existing'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* DUPLICATE POPUP */}
+            {showDuplicatePopup && (
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+                <div style={{ background: '#fff', borderRadius: 8, padding: 24, maxWidth: 500, width: '90%', maxHeight: '80vh', overflowY: 'auto' }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8, color: '#e53e3e' }}>⚠️ Duplicate Product Found!</div>
+                  <div style={{ fontSize: 13, color: '#555', marginBottom: 16 }}>
+                    We found {similarProducts.length} product(s) similar to yours already in the system:
+                  </div>
+                  {similarProducts.slice(0, 3).map((sp) => (
+                    <div key={sp.id} style={{ padding: 10, background: '#f8f9fa', borderRadius: 6, marginBottom: 8 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{sp.title}</div>
+                      <div style={{ fontSize: 11, color: '#666' }}>Vendor: {sp.vendor.username} · Price: {money(sp.storePrice)} · Sold: {sp.totalSales}</div>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                    <button
+                      onClick={() => { setShowDuplicatePopup(false); }}
+                      style={{ flex: 1, background: '#28a745', color: '#fff', border: 'none', borderRadius: 4, padding: '10px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      ← Back (Use Existing)
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setShowDuplicatePopup(false);
+                        // Proceed with creating new listing
+                        const res = await fetch("/api/vendor/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle || autoTitle, platform: newPlat, category: newCat, description: newDesc, vendorPrice: parseFloat(newPrice), countryRegister: newCountry, deliveryFormat: newFormat.trim(), originalMail: newOriginalMail }) });
+                        const r = await res.json();
+                        if (r.success) { setNewTitle(""); setNewDesc(""); setNewPrice(""); setNewAccounts(""); setNewCountry(""); setNewFormat("email:pass"); setSimilarProducts([]); alert("Listing created! Now upload your accounts."); setTab("my-products"); refresh(); } else alert(r.error);
+                      }}
+                      style={{ flex: 1, background: '#dc3545', color: '#fff', border: 'none', borderRadius: 4, padding: '10px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      Create New Listing →
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 10, color: '#888', marginTop: 8, textAlign: 'center' }}>
+                    Note: Creating a duplicate may result in admin review.
+                  </div>
+                </div>
               </div>
             )}
 

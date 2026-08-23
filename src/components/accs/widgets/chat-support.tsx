@@ -149,6 +149,7 @@ export function ChatSupport() {
       if (d.success) {
         setNewMsg("");
         fetchMessages(activeSession.id);
+        fetchSessions();
       }
     } catch {}
     setLoading(false);
@@ -247,7 +248,7 @@ export function ChatSupport() {
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span style={{ fontWeight: 600, fontSize: 13 }}>{s.subject}</span>
                       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                        {s.unreadCount && s.unreadCount > 0 && (
+                        {(s.unreadCount || 0) > 0 && (
                           <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{s.unreadCount}</span>
                         )}
                         <span style={{

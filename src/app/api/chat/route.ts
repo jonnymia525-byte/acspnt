@@ -113,12 +113,24 @@ export async function POST(req: Request) {
     const msg = await prisma.chatMessage.create({
       data: { sessionId, senderId: userId, message: message.trim(), isAdmin },
     });
-    await prisma.chatSession.update({ where: { id: sessionId }, data: { updatedAt: new Date() } });
+    // If session was resolved/closed and user sends a message, reopen it
+    const updateData: any = { updatedAt: new Date() };
+    if (!isAdmin && (session.status === "resolved" || session.status === "closed")) {
+      updateData.status = "open";
+    }
+    await prisma.chatSession.update({ where: { id: sessionId }, data: updateData });
     return NextResponse.json({ success: true, message: msg });
   }
 
   if (action === "close_session") {
     if (!sessionId) return NextResponse.json({ error: "sessionId required" }, { status: 400 });
+    // Verify ownership or admin
+    const session = await prisma.chatSession.findUnique({ where: { id: sessionId } });
+    if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (session.userId !== userId && (!user || (user.role !== "admin" && user.role !== "moderator"))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     await prisma.chatSession.update({ where: { id: sessionId }, data: { status: "closed" } });
     return NextResponse.json({ success: true });
   }

@@ -227,6 +227,11 @@ export function AdminDashboard() {
   // Products grouped view
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [groupView, setGroupView] = useState<Record<string, 'details' | 'vendors' | 'list'>>({});
+  // Merge tool
+  const [showMergeTool, setShowMergeTool] = useState(false);
+  const [mergeCandidates, setMergeCandidates] = useState<Array<{ title: string; platform: string; category: string; products: Array<{ id: string; title: string; storePrice: number; vendorPrice: number; stock: number; totalSales: number; vendor: { id: string; username: string } }>; totalStock: number; totalSales: number }>>([]);
+  const [mergeSelected, setMergeSelected] = useState<Record<string, string[]>>({});
+  const [mergeLoading, setMergeLoading] = useState(false);
   const [groupDetail, setGroupDetail] = useState<Record<string, any>>({});
   const [holdProduct, setHoldProduct] = useState<Product | null>(null);
   const [editingLine, setEditingLine] = useState<{ productId: string; lineIndex: number } | null>(null);
@@ -518,6 +523,40 @@ export function AdminDashboard() {
     const r = await res.json();
     if (r.success) { loadAll(); } else alert(r.error);
     return r;
+  };
+
+  // Merge tool functions
+  const fetchMergeCandidates = async () => {
+    setMergeLoading(true);
+    try {
+      const res = await fetch("/api/admin/products/merge?action=find-similar");
+      const r = await res.json();
+      setMergeCandidates(r.mergeCandidates || []);
+    } catch { setMergeCandidates([]); }
+    setMergeLoading(false);
+  };
+
+  const mergeProducts = async (title: string) => {
+    const ids = mergeSelected[title] || [];
+    if (ids.length < 2) return alert("Select at least 2 products to merge");
+    if (!confirm(`Merge ${ids.length} products under "${title}"? This groups them on the storefront.`)) return;
+    try {
+      const res = await fetch("/api/admin/products/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "merge", productIds: ids, masterTitle: title }),
+      });
+      const r = await res.json();
+      if (r.success) { alert(r.message); fetchMergeCandidates(); loadAll(); } else alert(r.error);
+    } catch { alert("Merge failed"); }
+  };
+
+  const toggleMergeSelect = (title: string, productId: string) => {
+    setMergeSelected(prev => {
+      const current = prev[title] || [];
+      const next = current.includes(productId) ? current.filter(id => id !== productId) : [...current, productId];
+      return { ...prev, [title]: next };
+    });
   };
 
   const loadUserDetail = async (userId: string) => {
@@ -846,7 +885,7 @@ export function AdminDashboard() {
             {/* ==================== PRODUCTS ==================== */}
             {tab === "products" && !selectedProduct && (
               <>
-                <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: 'wrap' }}>
                   <select value={productFilter} onChange={e => setProductFilter(e.target.value)} className="input" style={{ width: 160 }}>
                     <option value="all">All Status</option>
                     <option value="pending">Pending</option>
@@ -856,7 +895,68 @@ export function AdminDashboard() {
                   </select>
                   <input type="text" placeholder="Search products..." value={search} onChange={e => setSearch(e.target.value)} className="input" style={{ flex: 1 }} />
                   <span style={{ fontSize: 12, color: "#888" }}>{filteredProducts.length} products</span>
+                  <button
+                    onClick={() => { setShowMergeTool(!showMergeTool); if (!showMergeTool) fetchMergeCandidates(); }}
+                    style={{ background: showMergeTool ? '#5a32a3' : '#6f42c1', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    🔗 Merge Tool
+                  </button>
                 </div>
+
+                {/* Merge Tool Panel */}
+                {showMergeTool && (
+                  <div className="panel" style={{ marginBottom: 16, border: '2px solid #6f42c1' }}>
+                    <div className="panel-head" style={{ background: '#6f42c1', color: '#fff' }}>
+                      🔗 Product Merge Tool
+                    </div>
+                    <div style={{ padding: 16 }}>
+                      {mergeLoading ? (
+                        <div style={{ padding: 20, textAlign: 'center', color: '#888' }}>Loading merge candidates...</div>
+                      ) : mergeCandidates.length === 0 ? (
+                        <div style={{ padding: 20, textAlign: 'center', color: '#888' }}>No duplicate products found to merge.</div>
+                      ) : (
+                        mergeCandidates.map((group) => (
+                          <div key={group.title} style={{ border: '1px solid #e0e0e0', borderRadius: 6, marginBottom: 12, overflow: 'hidden' }}>
+                            <div style={{ padding: '10px 16px', background: '#f8f9fa', borderBottom: '1px solid #e0e0e0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <div style={{ fontWeight: 700, fontSize: 14 }}>{group.title}</div>
+                                <div style={{ fontSize: 11, color: '#888' }}>{platformLabel(group.platform)} · {group.category} · {group.products.length} vendors · {group.totalStock} total stock</div>
+                              </div>
+                              <button
+                                onClick={() => mergeProducts(group.title)}
+                                disabled={!mergeSelected[group.title] || mergeSelected[group.title].length < 2}
+                                style={{
+                                  background: (!mergeSelected[group.title] || mergeSelected[group.title].length < 2) ? '#ccc' : '#28a745',
+                                  color: '#fff', border: 'none', borderRadius: 4, padding: '6px 14px',
+                                  fontSize: 12, fontWeight: 600, cursor: (!mergeSelected[group.title] || mergeSelected[group.title].length < 2) ? 'not-allowed' : 'pointer'
+                                }}
+                              >
+                                Merge Selected ({(mergeSelected[group.title] || []).length})
+                              </button>
+                            </div>
+                            <div style={{ padding: 8 }}>
+                              {group.products.map((p) => (
+                                <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 4, cursor: 'pointer', background: (mergeSelected[group.title] || []).includes(p.id) ? '#e8f5e9' : 'transparent' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={(mergeSelected[group.title] || []).includes(p.id)}
+                                    onChange={() => toggleMergeSelect(group.title, p.id)}
+                                  />
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600 }}>{p.vendor.username}</div>
+                                    <div style={{ fontSize: 11, color: '#666' }}>{money(p.storePrice)} · {p.stock} stock · {p.totalSales} sold</div>
+                                  </div>
+                                  <span style={{ fontSize: 11, color: '#888' }}>SKU: {p.id.slice(0, 8)}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Group products by title */}
                 {(() => {
                   const searched = filteredProducts.filter(p => !search || p.title.toLowerCase().includes(search.toLowerCase()) || p.vendor.username.toLowerCase().includes(search.toLowerCase()));

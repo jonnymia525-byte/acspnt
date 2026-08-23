@@ -15,7 +15,12 @@ import { SellerTermsPage } from "./pages/seller-terms-page";
 import { USDTDeposit } from "./widgets/usdt-deposit";
 
 export function PageRouter({ children }: { children: React.ReactNode }) {
-  const [page, setPage] = useState<string | null>(null);
+  const [page, setPage] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      return new URLSearchParams(window.location.search).get("page");
+    }
+    return null;
+  });
   const { user } = useStore();
 
   useEffect(() => {
@@ -23,12 +28,8 @@ export function PageRouter({ children }: { children: React.ReactNode }) {
       const params = new URLSearchParams(window.location.search);
       setPage(params.get("page"));
     };
-    const frame = requestAnimationFrame(sync);
     window.addEventListener("popstate", sync);
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("popstate", sync);
-    };
+    return () => window.removeEventListener("popstate", sync);
   }, []);
 
   // Listen for link clicks

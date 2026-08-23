@@ -81,6 +81,7 @@ export function USDTDeposit() {
   const handleVerify = async () => {
     if (!txHash.trim() || !result) return;
     setVerifyLoading(true);
+    setVerifyMsg("");
     try {
       const res = await fetch("/api/deposits", {
         method: "POST",
@@ -90,13 +91,18 @@ export function USDTDeposit() {
       const data = await res.json();
       if (data.success) {
         setVerifyMsg(data.message);
+        if (data.newBalance !== undefined) {
+          // Update user balance in store
+          const { useStore } = await import("@/store");
+          const store = useStore.getState();
+          if (store.user) store.setUser({ ...store.user, balance: data.newBalance });
+        }
         setStep("done");
       } else {
-        setVerifyMsg(data.error || "Failed");
-        setStep("verify");
+        setVerifyMsg(data.error || "Verification failed. Please check your transaction details.");
       }
     } catch {
-      setVerifyMsg("Network error");
+      setVerifyMsg("Network error. Please try again.");
     }
     setVerifyLoading(false);
   };
@@ -261,8 +267,14 @@ export function USDTDeposit() {
             </div>
 
             {verifyMsg && (
-              <div style={{ fontSize: 13, color: verifyMsg.includes("already been used") || verifyMsg.includes("error") || verifyMsg.includes("Failed") ? "#e53e3e" : "#3ea136", padding: 10, borderRadius: 6, background: verifyMsg.includes("already been used") || verifyMsg.includes("error") || verifyMsg.includes("Failed") ? "#fce4ec" : "#e8f5e9" }}>
+              <div style={{ fontSize: 13, color: verifyMsg.includes("already been used") || verifyMsg.includes("error") || verifyMsg.includes("Failed") || verifyMsg.includes("did not match") ? "#e53e3e" : "#3ea136", padding: 10, borderRadius: 6, background: verifyMsg.includes("already been used") || verifyMsg.includes("error") || verifyMsg.includes("Failed") || verifyMsg.includes("did not match") ? "#fce4ec" : "#e8f5e9", lineHeight: 1.5 }}>
                 {verifyMsg}
+              </div>
+            )}
+            {verifyLoading && (
+              <div style={{ fontSize: 12, color: "#1976d2", padding: 10, borderRadius: 6, background: "#e3f2fd", display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ display: "inline-block", width: 16, height: 16, border: "2px solid #1976d2", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                Verifying on blockchain... This may take a moment.
               </div>
             )}
 
@@ -282,13 +294,23 @@ export function USDTDeposit() {
         {/* STEP 4: Done */}
         {step === "done" && (
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>✓</div>
-            <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Deposit Submitted</h2>
+            <div style={{ width: 60, height: 60, borderRadius: 30, background: "#e8f5e9", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+              <span style={{ fontSize: 28, color: "#3ea136" }}>&#10003;</span>
+            </div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8, color: "#3ea136" }}>Payment Verified!</h2>
             <p style={{ fontSize: 13, color: "#666", marginBottom: 8, lineHeight: 1.5 }}>{verifyMsg}</p>
             {result && (
-              <p style={{ fontSize: 11, color: "#888", fontFamily: "monospace", wordBreak: "break-all", marginBottom: 20 }}>TX: {txHash}</p>
+              <div style={{ background: "#f9f9f9", borderRadius: 6, padding: 12, marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: "#888" }}>Transaction</div>
+                <div style={{ fontSize: 11, fontFamily: "monospace", wordBreak: "break-all", color: "#333" }}>{txHash}</div>
+                <div style={{ fontSize: 11, color: "#888", marginTop: 6 }}>Network</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{result.networkLabel}</div>
+              </div>
             )}
-            <Link href="/" style={{ display: "inline-block", padding: "12px 32px", borderRadius: 6, background: "#3ea136", color: "#fff", fontSize: 14, fontWeight: 600, textDecoration: "none" }}>Back to Store</Link>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Link href="/" style={{ flex: 1, display: "block", textAlign: "center", padding: "12px 0", borderRadius: 6, border: "1px solid #ddd", background: "#fff", fontSize: 13, textDecoration: "none", color: "#333" }}>Back to Store</Link>
+              <button onClick={() => { setStep("select"); setAmount(""); setTxHash(""); setVerifyMsg(""); setResult(null); }} style={{ flex: 1, padding: "12px 0", borderRadius: 6, border: "none", background: "#3ea136", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Deposit More</button>
+            </div>
           </div>
         )}
 

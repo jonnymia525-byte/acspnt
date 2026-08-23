@@ -2,23 +2,101 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 
-export async function GET() {
+// GET - user's chat sessions, or messages for a specific session
+export async function GET(req: Request) {
   const cookieStore = await cookies();
   const userId = cookieStore.get("accsm_user_id")?.value;
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const messages = await prisma.chatMessage.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, take: 100 });
-  return NextResponse.json(messages);
+  const url = new URL(req.url);
+  const sessionId = url.searchParams.get("sessionId");
+
+  if (sessionId) {
+    // Get messages for a specific session
+    const session = await prisma.chatSession.findUnique({ where: { id: sessionId } });
+    if (!session || (session.userId !== userId)) {
+      // Check if user is admin/moderator
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user || (user.role !== "admin" && user.role !== "moderator")) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
+    const messages = await prisma.chatMessage.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: "asc" },
+      include: { sender: { select: { id: true, username: true, name: true, role: true } } },
+    });
+    // Mark unread messages as read
+    await prisma.chatMessage.updateMany({
+      where: { sessionId, senderId: { not: userId }, read: false },
+      data: { read: true },
+    });
+    return NextResponse.json({ messages });
+  }
+
+  // Get user's chat sessions
+  const sessions = await prisma.chatSession.findMany({
+    where: { userId },
+    orderBy: { updatedAt: "desc" },
+    include: {
+      messages: { orderBy: { createdAt: "desc" }, take: 1 },
+      assignee: { select: { username: true, name: true } },
+    },
+  });
+  return NextResponse.json({ sessions });
 }
 
+// POST - create new session or send message in existing session
 export async function POST(req: Request) {
   const cookieStore = await cookies();
   const userId = cookieStore.get("accsm_user_id")?.value;
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { message } = await req.json();
-  if (!message?.trim()) return NextResponse.json({ error: "Message required" }, { status: 400 });
+  const body = await req.json();
+  const { action, sessionId, subject, category, priority, message } = body;
 
-  const msg = await prisma.chatMessage.create({ data: { sender: "user", message: message.trim(), userId } });
-  return NextResponse.json({ success: true, message: msg });
+  if (action === "create_session") {
+    if (!subject?.trim() || !message?.trim()) {
+      return NextResponse.json({ error: "Subject and message required" }, { status: 400 });
+    }
+    const session = await prisma.chatSession.create({
+      data: { subject: subject.trim(), category: category || "general", priority: priority || "normal", userId },
+    });
+    await prisma.chatMessage.create({
+      data: { sessionId: session.id, senderId: userId, message: message.trim(), isAdmin: false },
+    });
+    await prisma.activityLog.create({
+      data: { action: "support_ticket_created", description: `User created support ticket: ${subject}`, userId },
+    });
+    return NextResponse.json({ success: true, session });
+  }
+
+  if (action === "send_message") {
+    if (!sessionId || !message?.trim()) {
+      return NextResponse.json({ error: "sessionId and message required" }, { status: 400 });
+    }
+    const session = await prisma.chatSession.findUnique({ where: { id: sessionId } });
+    if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    if (session.userId !== userId) {
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user || (user.role !== "admin" && user.role !== "moderator")) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const isAdmin = user?.role === "admin" || user?.role === "moderator";
+    const msg = await prisma.chatMessage.create({
+      data: { sessionId, senderId: userId, message: message.trim(), isAdmin },
+    });
+    await prisma.chatSession.update({ where: { id: sessionId }, data: { updatedAt: new Date() } });
+    return NextResponse.json({ success: true, message: msg });
+  }
+
+  if (action === "close_session") {
+    if (!sessionId) return NextResponse.json({ error: "sessionId required" }, { status: 400 });
+    await prisma.chatSession.update({ where: { id: sessionId }, data: { status: "closed" } });
+    return NextResponse.json({ success: true });
+  }
+
+  return NextResponse.json({ error: "Unknown action" }, { status: 400 });
 }

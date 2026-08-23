@@ -341,6 +341,7 @@ html.dark .tag-bestseller { background: #3a3520; color: #e8a000; border-color: #
 /* ===== RESPONSIVE ===== */
 .hide-mobile { display: block; }
 .show-mobile { display: none; }
+.unit-col { display: none !important; }
 .wrap { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
 
 @media (max-width: 768px) {

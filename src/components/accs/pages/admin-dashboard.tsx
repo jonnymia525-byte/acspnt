@@ -53,8 +53,8 @@ interface UserDetail extends User {
   disputes: Array<{ id: string; reason: string; status: string; resolution: string | null; createdAt: string }>;
 }
 
-const TABS = ["overview", "users", "vendors", "products", "orders", "withdrawals", "coupons", "deposits", "notices", "activity", "sales", "recycle-bin", "settings"];
-const TAB_LABELS: Record<string, string> = { "overview": "Overview", "users": "Users", "vendors": "Vendors", "products": "Products", "orders": "Orders", "withdrawals": "Withdrawals", "coupons": "Coupons", "deposits": "Deposits", "notices": "Notices", "activity": "Activity", "sales": "Sales", "recycle-bin": "Recycle Bin", "settings": "Settings" };
+const TABS = ["overview", "users", "vendors", "products", "best-sellers", "orders", "withdrawals", "coupons", "deposits", "notices", "activity", "sales", "manage", "support-chat", "moderators", "recycle-bin", "settings"];
+const TAB_LABELS: Record<string, string> = { "overview": "Overview", "users": "Users", "vendors": "Vendors", "products": "Products", "best-sellers": "Best Sellers", "orders": "Orders", "withdrawals": "Withdrawals", "coupons": "Coupons", "deposits": "Deposits", "notices": "Notices", "activity": "Activity", "sales": "Sales", "manage": "Manage", "support-chat": "Support Chat", "moderators": "Moderators", "recycle-bin": "Recycle Bin", "settings": "Settings" };
 
 interface ListingItem {
   id: string; title: string; platform: string; category: string;
@@ -317,8 +317,50 @@ export function AdminDashboard() {
     setLoading(false);
   };
 
+  // Management search
+  const [mgmtQuery, setMgmtQuery] = useState("");
+  const [mgmtType, setMgmtType] = useState("all");
+  const [mgmtResults, setMgmtResults] = useState<{users: User[], vendors: User[], products: Product[]}>({users: [], vendors: [], products: []});
+  const [mgmtLoading, setMgmtLoading] = useState(false);
+  const [mgmtExpanded, setMgmtExpanded] = useState<string | null>(null);
+
+  // Deposits data
+  const [allDeposits, setAllDeposits] = useState<any[]>([]);
+
+  // Support chat
+  const [chatSessions, setChatSessions] = useState<any[]>([]);
+  const [chatSessionFilter, setChatSessionFilter] = useState("");
+  const [activeChatSession, setActiveChatSession] = useState<any>(null);
+  const [activeChatMessages, setActiveChatMessages] = useState<any[]>([]);
+  const [chatReplyMsg, setChatReplyMsg] = useState("");
+  const [moderators, setModerators] = useState<any[]>([]);
+  const [modUsername, setModUsername] = useState("");
+  const [modEmail, setModEmail] = useState("");
+  const [modPassword, setModPassword] = useState("");
+  const [modName, setModName] = useState("");
+
   useEffect(() => { loadAll(); }, []);
   useEffect(() => { if (tab === "settings") fetchSettings(); }, [tab]);
+  useEffect(() => { setSelectedUser(null); setSelectedProduct(null); setMgmtExpanded(null); }, [tab]);
+
+  // Live search with debounce
+  useEffect(() => {
+    if (!mgmtQuery.trim()) { setMgmtResults({users: [], vendors: [], products: []}); setMgmtExpanded(null); return; }
+    setMgmtLoading(true);
+    const timer = setTimeout(() => {
+      const q = mgmtQuery.toLowerCase();
+      const matchedUsers = users.filter(u => (u.role !== 'admin') && (u.role !== 'vendor') && (u.username.toLowerCase().includes(q) || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)));
+      const matchedVendors = users.filter(u => (u.role === 'vendor' || u.vendorStatus === 'approved' || u.vendorStatus === 'pending') && (u.username.toLowerCase().includes(q) || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)));
+      const matchedProducts = products.filter(p => p.title.toLowerCase().includes(q) || p.vendor.username.toLowerCase().includes(q) || p.platform.toLowerCase().includes(q));
+      setMgmtResults({
+        users: mgmtType === 'vendors' || mgmtType === 'products' ? [] : matchedUsers,
+        vendors: mgmtType === 'users' || mgmtType === 'products' ? [] : matchedVendors,
+        products: mgmtType === 'users' || mgmtType === 'vendors' ? [] : matchedProducts,
+      });
+      setMgmtLoading(false);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [mgmtQuery, mgmtType, users, products]);
 
   // Recycle bin
   const fetchRecycleBin = async (type?: string) => {
@@ -332,6 +374,89 @@ export function AdminDashboard() {
     setLoadingRecycle(false);
   };
   useEffect(() => { if (tab === "recycle-bin") fetchRecycleBin(recycleType); }, [tab, recycleType]);
+
+  // Support chat admin
+  const fetchChatSessions = async (status?: string) => {
+    try {
+      const url = status ? `/api/chat/admin?status=${status}` : "/api/chat/admin";
+      const res = await fetch(url);
+      const d = await res.json();
+      setChatSessions(d.sessions || []);
+    } catch {}
+  };
+  useEffect(() => { if (tab === "support-chat") fetchChatSessions(chatSessionFilter); }, [tab, chatSessionFilter]);
+
+  const openChatSessionAdmin = async (sessionId: string) => {
+    try {
+      const res = await fetch(`/api/chat/admin?sessionId=${sessionId}`);
+      const d = await res.json();
+      setActiveChatSession(d.session);
+      setActiveChatMessages(d.messages || []);
+    } catch {}
+  };
+
+  const sendChatReply = async () => {
+    if (!chatReplyMsg.trim() || !activeChatSession) return;
+    try {
+      const res = await fetch("/api/chat/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reply", sessionId: activeChatSession.id, message: chatReplyMsg }) });
+      const d = await res.json();
+      if (d.success) {
+        setChatReplyMsg("");
+        openChatSessionAdmin(activeChatSession.id);
+      }
+    } catch {};
+  };
+
+  const resolveChatSession = async (sessionId: string) => {
+    try {
+      await fetch("/api/chat/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "resolve", sessionId }) });
+      fetchChatSessions(chatSessionFilter);
+      setActiveChatSession(null);
+    } catch {};
+  };
+
+  const assignChatSession = async (sessionId: string, assignTo: string) => {
+    try {
+      await fetch("/api/chat/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "assign", sessionId, assignTo }) });
+      fetchChatSessions(chatSessionFilter);
+    } catch {};
+  };
+
+  // Moderators
+  const fetchModerators = async () => {
+    try {
+      const res = await fetch("/api/admin/moderators");
+      const d = await res.json();
+      setModerators(d.moderators || []);
+    } catch {};
+  };
+  useEffect(() => { if (tab === "moderators") fetchModerators(); }, [tab]);
+
+  const createModerator = async () => {
+    if (!modUsername || !modEmail || !modPassword) return alert("Username, email, and password required");
+    try {
+      const res = await fetch("/api/admin/moderators", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create", username: modUsername, email: modEmail, password: modPassword, name: modName }) });
+      const d = await res.json();
+      if (d.success) { setModUsername(""); setModEmail(""); setModPassword(""); setModName(""); fetchModerators(); } else alert(d.error);
+    } catch {}
+  };
+
+  const removeModerator = async (userId: string) => {
+    if (!confirm("Remove this moderator? Their sessions will be unassigned.")) return;
+    try {
+      await fetch("/api/admin/moderators", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "remove", userId }) });
+      fetchModerators();
+    } catch {};
+  };
+
+  // Fetch deposits
+  const fetchDeposits = async () => {
+    try {
+      const res = await fetch('/api/deposits?action=admin_list');
+      if (res.ok) { const d = await res.json(); setAllDeposits(d.deposits || []); }
+    } catch {}
+  };
+  useEffect(() => { if (tab === 'deposits') fetchDeposits(); }, [tab]);
 
   const handleRecycleAction = async (action: string, type: string, id: string) => {
     try {
@@ -390,9 +515,23 @@ export function AdminDashboard() {
   };
 
   const loadUserDetail = async (userId: string) => {
-    const res = await fetch(`/api/admin/users?action=detail&userId=${userId}`);
-    const r = await res.json();
-    if (r.user) setSelectedUser(r);
+    try {
+      const res = await fetch(`/api/admin/users?action=detail&userId=${userId}`);
+      const r = await res.json();
+      if (r.user) {
+        setSelectedUser({
+          ...r.user,
+          purchases: r.purchases || [],
+          deposits: r.deposits || [],
+          withdrawals: r.withdrawals || [],
+          reviews: r.reviews || [],
+          products: r.products || [],
+          activityLogs: r.activityLogs || [],
+          sentMessages: r.sentMessages || [],
+          disputes: r.disputes || [],
+        });
+      }
+    } catch {}
   };
 
   const loadProductDetail = async (productId: string) => {
@@ -521,14 +660,14 @@ export function AdminDashboard() {
               </>
             )}
 
-            {/* User Detail Panel */}
-            {tab === "users" && selectedUser && (
+            {/* User/Vendor Detail Panel */}
+            {((tab === "users" || tab === "vendors") && selectedUser) && (
               <div>
                 <button onClick={() => { setSelectedUser(null); setDetailTab("overview"); }} className="btn btn-secondary btn-sm" style={{ marginBottom: 12 }}>&larr; Back</button>
                 <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                   <div className="panel" style={{ flex: 1, minWidth: 200, padding: 16 }}>
-                    <div style={{ fontSize: 16, fontWeight: 700 }}>{selectedUser.name}</div>
-                    <div style={{ fontSize: 12, color: "#888" }}>@{selectedUser.username}</div>
+                    <div style={{ fontSize: 16, fontWeight: 700 }}>{selectedUser.name || selectedUser.username}</div>
+                    <div style={{ fontSize: 12, color: "#888" }}>@{selectedUser.username} <span style={{ fontSize: 10, color: '#666', marginLeft: 6 }}>({selectedUser.id})</span></div>
                     <div style={{ fontSize: 12, color: "#888" }}>{selectedUser.email}</div>
                     <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                       <div><div style={{ fontSize: 11, color: "#888" }}>Balance</div><div style={{ fontSize: 14, fontWeight: 700, color: "#3ea136" }}>{money(selectedUser.balance)}</div></div>
@@ -551,25 +690,33 @@ export function AdminDashboard() {
                     </div>
                   </div>
                 </div>
-                {/* User activity tabs */}
-                <div style={{ display: "flex", gap: 4, overflowX: "auto", marginBottom: 12, paddingBottom: 4 }}>
-                  {(["overview", "purchases", "deposits", "withdrawals", "products", "reviews", "disputes", "messages", "activity"] as const).map(tab => {
-                    const dataMap: Record<string, any[]> = {
-                      purchases: selectedUser.purchases, deposits: selectedUser.deposits,
-                      withdrawals: selectedUser.withdrawals, products: selectedUser.products,
-                      reviews: selectedUser.reviews, disputes: selectedUser.disputes,
-                      messages: selectedUser.sentMessages, activity: selectedUser.activityLogs,
-                    };
-                    const count = dataMap[tab]?.length || 0;
-                    return (
-                      <button key={tab} onClick={() => setDetailTab(tab)} style={{
-                        padding: "5px 12px", borderRadius: 16, border: "none", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer",
-                        background: detailTab === tab ? "#3ea136" : "#f0f0f0",
-                        color: detailTab === tab ? "#fff" : "#666",
-                      }}>{tab.charAt(0).toUpperCase() + tab.slice(1)}{count > 0 ? ` (${count})` : ""}</button>
-                    );
-                  })}
-                </div>
+                {/* User/Vendor activity tabs */}
+                {(() => {
+                  const isVendor = selectedUser.role === 'vendor' || selectedUser.vendorStatus === 'approved' || selectedUser.vendorStatus === 'pending';
+                  const buyerTabs = ["overview", "purchases", "deposits", "withdrawals", "products", "reviews", "disputes", "messages", "activity"] as const;
+                  const vendorTabs = ["overview", "products", "deposits", "withdrawals", "reviews", "messages", "activity"] as const;
+                  const tabs = isVendor ? vendorTabs : buyerTabs;
+                  const dataMap: Record<string, any[]> = {
+                    purchases: selectedUser.purchases, deposits: selectedUser.deposits,
+                    withdrawals: selectedUser.withdrawals, products: selectedUser.products,
+                    reviews: selectedUser.reviews, disputes: selectedUser.disputes,
+                    messages: selectedUser.sentMessages, activity: selectedUser.activityLogs,
+                  };
+                  return (
+                    <div style={{ display: "flex", gap: 4, overflowX: "auto", marginBottom: 12, paddingBottom: 4 }}>
+                      {tabs.map(tab => {
+                        const count = dataMap[tab]?.length || 0;
+                        return (
+                          <button key={tab} onClick={() => setDetailTab(tab)} style={{
+                            padding: "5px 12px", borderRadius: 16, border: "none", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer",
+                            background: detailTab === tab ? "#3ea136" : "#f0f0f0",
+                            color: detailTab === tab ? "#fff" : "#666",
+                          }}>{tab.charAt(0).toUpperCase() + tab.slice(1)}{count > 0 ? ` (${count})` : ""}</button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
                 {(() => {
                   const dataMap: Record<string, any[]> = {
                     purchases: selectedUser.purchases, deposits: selectedUser.deposits,
@@ -579,13 +726,24 @@ export function AdminDashboard() {
                   };
                   const items = dataMap[detailTab] || [];
                   if (detailTab === "overview") {
-                    const stats = [
-                      { l: "Purchases", v: selectedUser.purchases?.length || 0, c: "#333" },
-                      { l: "Deposits", v: selectedUser.deposits?.length || 0, c: "#333" },
-                      { l: "Withdrawals", v: selectedUser.withdrawals?.length || 0, c: "#333" },
+                    const isVendor = selectedUser.role === 'vendor' || selectedUser.vendorStatus === 'approved' || selectedUser.vendorStatus === 'pending';
+                    const totalEarnings = (selectedUser.purchases || []).reduce((s: number, p: any) => s + (p.total || 0), 0);
+                    const totalDeposits = (selectedUser.deposits || []).reduce((s: number, d: any) => s + (d.amount || 0), 0);
+                    const totalWithdrawals = (selectedUser.withdrawals || []).reduce((s: number, w: any) => s + (w.amount || 0), 0);
+                    const stats = isVendor ? [
                       { l: "Products", v: selectedUser.products?.length || 0, c: "#333" },
+                      { l: "Sales", v: selectedUser.purchases?.length || 0, c: "#3ea136" },
+                      { l: "Earnings", v: money(totalEarnings), c: "#3ea136" },
+                      { l: "Deposits", v: selectedUser.deposits?.length || 0, c: "#333" },
                       { l: "Reviews", v: selectedUser.reviews?.length || 0, c: "#333" },
-                      { l: "Disputes", v: selectedUser.disputes?.length || 0, c: "#333" },
+                      { l: "Balance", v: money(selectedUser.balance), c: "#1976d2" },
+                    ] : [
+                      { l: "Purchases", v: selectedUser.purchases?.length || 0, c: "#333" },
+                      { l: "Spent", v: money(totalDeposits - selectedUser.balance), c: "#333" },
+                      { l: "Deposits", v: money(totalDeposits), c: "#3ea136" },
+                      { l: "Withdrawals", v: selectedUser.withdrawals?.length || 0, c: "#333" },
+                      { l: "Reviews", v: selectedUser.reviews?.length || 0, c: "#333" },
+                      { l: "Balance", v: money(selectedUser.balance), c: "#3ea136" },
                     ];
                     return (
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
@@ -696,8 +854,6 @@ export function AdminDashboard() {
                   <input type="text" placeholder="Search products..." value={search} onChange={e => setSearch(e.target.value)} className="input" style={{ flex: 1 }} />
                   <span style={{ fontSize: 12, color: "#888" }}>{filteredProducts.length} products</span>
                 </div>
-                <BestSellerManager loadAll={loadAll} />
-
                 {/* Group products by title */}
                 {(() => {
                   const searched = filteredProducts.filter(p => !search || p.title.toLowerCase().includes(search.toLowerCase()) || p.vendor.username.toLowerCase().includes(search.toLowerCase()));
@@ -772,31 +928,34 @@ export function AdminDashboard() {
                               setExpandedGroup(next);
                               if (next) setGroupView(v => ({ ...v, [title]: 'details' }));
                             }}
-                            className={`btn btn-sm ${isExpanded && view === 'details' ? 'btn-primary' : 'btn-secondary'}`}
-                          >📋 Details</button>
+                            className="btn btn-sm"
+                            style={{ background: isExpanded && view === 'details' ? '#5a32a3' : '#6f42c1', color: '#fff', border: 'none', padding: '5px 10px', fontSize: 12, fontWeight: 600, borderRadius: 4 }}
+                          >Details</button>
                           <button
                             onClick={() => {
                               const next = isExpanded && view === 'vendors' ? null : title;
                               setExpandedGroup(next);
                               if (next) setGroupView(v => ({ ...v, [title]: 'vendors' }));
                             }}
-                            className={`btn btn-sm ${isExpanded && view === 'vendors' ? 'btn-primary' : 'btn-secondary'}`}
-                          >👤 Vendors ({vendors.length})</button>
+                            className="btn btn-sm"
+                            style={{ background: isExpanded && view === 'vendors' ? '#0056b3' : '#007bff', color: '#fff', border: 'none', padding: '5px 10px', fontSize: 12, fontWeight: 600, borderRadius: 4 }}
+                          >Seller ({vendors.length})</button>
                           <button
                             onClick={() => {
                               const next = isExpanded && view === 'list' ? null : title;
                               setExpandedGroup(next);
                               if (next) setGroupView(v => ({ ...v, [title]: 'list' }));
                             }}
-                            className={`btn btn-sm ${isExpanded && view === 'list' ? 'btn-primary' : 'btn-secondary'}`}
-                          >📦 Product List ({groupProducts.length})</button>
+                            className="btn btn-sm"
+                            style={{ background: isExpanded && view === 'list' ? '#17a2b8' : '#20c997', color: '#fff', border: 'none', padding: '5px 10px', fontSize: 12, fontWeight: 600, borderRadius: 4 }}
+                          >Products List ({groupProducts.length})</button>
                           {/* Quick actions on the group */}
                           {groupProducts.some(p => p.status === 'pending') && (
-                            <button className="btn btn-sm btn-primary" onClick={() => {
+                            <button className="btn btn-sm" style={{ background: '#28a745', color: '#fff', border: 'none', padding: '5px 10px', fontSize: 12, fontWeight: 600, borderRadius: 4 }} onClick={() => {
                               if (confirm(`Approve all ${groupProducts.filter(p => p.status === 'pending').length} pending products in "${title}"?`)) {
                                 groupProducts.filter(p => p.status === 'pending').forEach(p => doProductAction('approve', p.id));
                               }
-                            }}>✅ Approve All Pending</button>
+                            }}>Approve All</button>
                           )}
                           {/* Visibility toggle */}
                           {(() => {
@@ -806,14 +965,14 @@ export function AdminDashboard() {
                             return (
                               <button
                                 className="btn btn-sm"
-                                style={{ background: isVisible ? '#3ea136' : '#ff9800', color: '#fff', border: 'none' }}
+                                style={{ background: isVisible ? '#6c757d' : '#ff9800', color: '#fff', border: 'none', padding: '5px 10px', fontSize: 12, fontWeight: 600, borderRadius: 4 }}
                                 onClick={() => {
-                                  const action = isVisible ? 'Hide' : 'Unhide';
+                                  const action = isVisible ? 'Hide' : 'Show';
                                   if (confirm(`${action} listing \"${title}\" for users and vendors? Admin can always see it.`)) {
                                     toggleListingVisibility(lid);
                                   }
                                 }}
-                              >{isVisible ? '🙈 Hide' : '👁 Unhide'}</button>
+                              >{isVisible ? 'Hide' : 'Show'}</button>
                             );
                           })()}
                         </div>
@@ -837,21 +996,21 @@ export function AdminDashboard() {
                                   const all = getAllAccounts();
                                   const data = extractField(all.join('\n'), usernameIdx);
                                   downloadText(data, `${title.replace(/[^a-z0-9]/gi, '_')}_usernames.txt`);
-                                }}>📥 Usernames</button>
+                                }}>↓ Usernames</button>
                               )}
                               {passIdx >= 0 && (
                                 <button className="btn btn-sm btn-secondary" onClick={() => {
                                   const all = getAllAccounts();
                                   const data = extractField(all.join('\n'), passIdx);
                                   downloadText(data, `${title.replace(/[^a-z0-9]/gi, '_')}_passwords.txt`);
-                                }}>📥 Passwords</button>
+                                }}>↓ Passwords</button>
                               )}
                               {emailIdx >= 0 && (
                                 <button className="btn btn-sm btn-secondary" onClick={() => {
                                   const all = getAllAccounts();
                                   const data = extractField(all.join('\n'), emailIdx);
                                   downloadText(data, `${title.replace(/[^a-z0-9]/gi, '_')}_emails.txt`);
-                                }}>📥 Emails</button>
+                                }}>↓ Emails</button>
                               )}
                               {emailIdx >= 0 && passIdx >= 0 && (
                                 <button className="btn btn-sm btn-secondary" onClick={() => {
@@ -861,12 +1020,12 @@ export function AdminDashboard() {
                                     return `${parts[emailIdx] || ''}:${parts[passIdx] || ''}`;
                                   }).filter(l => l !== ':');
                                   downloadText(lines.join('\n'), `${title.replace(/[^a-z0-9]/gi, '_')}_email_pass.txt`);
-                                }}>📥 Email:Pass</button>
+                                }}>↓ Email:Pass</button>
                               )}
                               <button className="btn btn-sm btn-secondary" onClick={() => {
                                 const all = getAllAccounts();
                                 downloadText(all.join('\n'), `${title.replace(/[^a-z0-9]/gi, '_')}_all_data.txt`);
-                              }}>📥 All Data</button>
+                              }}>↓ All Data</button>
                             </div>
                           </div>
                         )}
@@ -904,11 +1063,11 @@ export function AdminDashboard() {
                                     <span style={{ fontSize: 11, color: '#3ea136', fontWeight: 600 }}>{money(p.storePrice)}/ea</span>
                                     <span style={{ fontSize: 11, color: '#888' }}>· {accountLines.length} accounts</span>
                                     <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-                                      {p.status === 'pending' && <button className="btn btn-primary btn-sm" onClick={() => doProductAction('approve', p.id)}>✅ Approve</button>}
-                                      {p.status === 'pending' && <button className="btn btn-danger btn-sm" onClick={() => { setRejectProduct(p); setRejectReason(''); }}>❌ Reject</button>}
-                                      <button className="btn btn-sm" style={{ background: p.status === 'hold' ? '#ff9800' : '#666', color: '#fff', border: 'none' }} onClick={() => doProductAction('hold', p.id)}>{p.status === 'hold' ? '▶ Unhold' : '⏸ Hold'}</button>
-                                      <button className="btn btn-secondary btn-sm" onClick={() => { setEditProduct(p); setEpTitle(p.title); setEpDesc(p.description); setEpPrice(String(p.vendorPrice)); setEpStock(String(p.stock)); }}>✏️ Edit</button>
-                                      <button className="btn btn-danger btn-sm" onClick={() => { if (confirm(`Delete product from @${p.vendor.username}?`)) doProductAction('delete', p.id); }}>🗑️</button>
+                                      {p.status === 'pending' && <button className="btn btn-sm" style={{ background: '#28a745', color: '#fff', border: 'none', padding: '5px 10px', fontSize: 12, fontWeight: 600, borderRadius: 4 }} onClick={() => doProductAction('approve', p.id)}>Approve</button>}
+                                      {p.status === 'pending' && <button className="btn btn-sm" style={{ background: '#dc3545', color: '#fff', border: 'none', padding: '5px 10px', fontSize: 12, fontWeight: 600, borderRadius: 4 }} onClick={() => { setRejectProduct(p); setRejectReason(''); }}>Reject</button>}
+                                      <button className="btn btn-sm" style={{ background: p.status === 'hold' ? '#ff9800' : '#666', color: '#fff', border: 'none', padding: '5px 10px', fontSize: 12, borderRadius: 4 }} onClick={() => doProductAction('hold', p.id)}>{p.status === 'hold' ? 'Unhold' : 'Hold'}</button>
+                                      <button className="btn btn-sm" style={{ background: '#28a745', color: '#fff', border: 'none', padding: '5px 10px', fontSize: 12, fontWeight: 600, borderRadius: 4 }} onClick={() => { setEditProduct(p); setEpTitle(p.title); setEpDesc(p.description); setEpPrice(String(p.vendorPrice)); setEpStock(String(p.stock)); }}>Edit</button>
+                                      <button className="btn btn-sm" style={{ background: '#dc3545', color: '#fff', border: 'none', padding: '5px 10px', fontSize: 12, fontWeight: 600, borderRadius: 4 }} onClick={() => { if (confirm(`Delete product from @${p.vendor.username}?`)) doProductAction('delete', p.id); }}>Delete</button>
                                     </div>
                                   </div>
                                   {/* Account lines */}
@@ -948,13 +1107,13 @@ export function AdminDashboard() {
                                           )}
                                           {!isEditingThisLine && (
                                             <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-                                              <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, padding: '1px 5px' }} title="Edit line" onClick={() => { setEditingLine({ productId: p.id, lineIndex: lineIdx }); setEditingLineEdit(line); }}>✏️</button>
+                                              <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, padding: '1px 5px' }} title="Edit line" onClick={() => { setEditingLine({ productId: p.id, lineIndex: lineIdx }); setEditingLineEdit(line); }}>Edit</button>
                                               <button className="btn btn-danger btn-sm" style={{ fontSize: 10, padding: '1px 5px' }} title="Delete line" onClick={() => {
                                                 if (confirm(`Delete this account line?`)) {
                                                   fetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete_account_line', productId: p.id, lineIndex: lineIdx }) })
                                                     .then(r => r.json()).then(r => { if (r.success) loadAll(); else alert(r.error); });
                                                 }
-                                              }}>🗑️</button>
+                                              }}>Del</button>
                                             </div>
                                           )}
                                         </div>
@@ -969,7 +1128,7 @@ export function AdminDashboard() {
                               {selectedAccounts.size > 0 && (
                                 <>
                                   <span style={{ fontSize: 11, fontWeight: 600, color: '#1976d2' }}>{selectedAccounts.size} selected</span>
-                                  <button className="btn btn-danger btn-sm" onClick={() => {
+                                  <button className="btn btn-danger btn-sm" style={{ background: '#dc3545', color: '#fff', border: 'none', padding: '5px 10px', fontSize: 11, borderRadius: 4 }} onClick={() => {
                                     if (confirm(`Delete ${selectedAccounts.size} selected account lines? This cannot be undone.`)) {
                                       const entries = Array.from(selectedAccounts).map(k => { const [pid, idx] = k.split(':'); return { productId: pid, lineIndex: parseInt(idx) }; });
                                       entries.sort((a, b) => b.lineIndex - a.lineIndex);
@@ -981,20 +1140,20 @@ export function AdminDashboard() {
                                         loadAll();
                                       })();
                                     }
-                                  }}>🗑️ Delete Selected</button>
+                                  }}>Delete Selected</button>
                                 </>
                               )}
                               <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
                                 <span style={{ fontSize: 11, color: '#888', alignSelf: 'center' }}>Download:</span>
-                                {usernameIdx >= 0 && <button className="btn btn-sm btn-secondary" onClick={() => { const all = getAllAccounts(); downloadText(extractField(all.join('\n'), usernameIdx), `${title.replace(/[^a-z0-9]/gi, '_')}_usernames.txt`); }}>📥 Usernames</button>}
-                                {passIdx >= 0 && <button className="btn btn-sm btn-secondary" onClick={() => { const all = getAllAccounts(); downloadText(extractField(all.join('\n'), passIdx), `${title.replace(/[^a-z0-9]/gi, '_')}_passwords.txt`); }}>📥 Passwords</button>}
-                                {emailIdx >= 0 && <button className="btn btn-sm btn-secondary" onClick={() => { const all = getAllAccounts(); downloadText(extractField(all.join('\n'), emailIdx), `${title.replace(/[^a-z0-9]/gi, '_')}_emails.txt`); }}>📥 Emails</button>}
+                                {usernameIdx >= 0 && <button className="btn btn-sm btn-secondary" onClick={() => { const all = getAllAccounts(); downloadText(extractField(all.join('\n'), usernameIdx), `${title.replace(/[^a-z0-9]/gi, '_')}_usernames.txt`); }}>↓ Usernames</button>}
+                                {passIdx >= 0 && <button className="btn btn-sm btn-secondary" onClick={() => { const all = getAllAccounts(); downloadText(extractField(all.join('\n'), passIdx), `${title.replace(/[^a-z0-9]/gi, '_')}_passwords.txt`); }}>↓ Passwords</button>}
+                                {emailIdx >= 0 && <button className="btn btn-sm btn-secondary" onClick={() => { const all = getAllAccounts(); downloadText(extractField(all.join('\n'), emailIdx), `${title.replace(/[^a-z0-9]/gi, '_')}_emails.txt`); }}>↓ Emails</button>}
                                 {emailIdx >= 0 && passIdx >= 0 && <button className="btn btn-sm btn-secondary" onClick={() => {
                                   const all = getAllAccounts();
                                   const lines = all.map(line => { const parts = line.split(':'); return `${parts[emailIdx] || ''}:${parts[passIdx] || ''}`; }).filter(l => l !== ':');
                                   downloadText(lines.join('\n'), `${title.replace(/[^a-z0-9]/gi, '_')}_email_pass.txt`);
-                                }}>📥 Email:Pass</button>}
-                                <button className="btn btn-sm btn-secondary" onClick={() => { const all = getAllAccounts(); downloadText(all.join('\n'), `${title.replace(/[^a-z0-9]/gi, '_')}_all.txt`); }}>📥 All Data ({allAccountsCount} lines)</button>
+                                }}>↓ Email:Pass</button>}
+                                <button className="btn btn-sm btn-secondary" onClick={() => { const all = getAllAccounts(); downloadText(all.join('\n'), `${title.replace(/[^a-z0-9]/gi, '_')}_all.txt`); }}>↓ All Data ({allAccountsCount} lines)</button>
                               </div>
                             </div>
                           </div>
@@ -1068,6 +1227,164 @@ export function AdminDashboard() {
               </div>
             )}
 
+            {/* ==================== BEST SELLERS ==================== */}
+            {tab === "best-sellers" && (
+              <BestSellerManager loadAll={loadAll} />
+            )}
+
+            {/* ==================== MANAGE ==================== */}
+            {tab === "manage" && (
+              <>
+                <div className="panel" style={{ marginBottom: 12 }}>
+                  <div className="panel-head">Universal Search</div>
+                  <div style={{ padding: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input type="text" placeholder="Type to search users, vendors, or products..." value={mgmtQuery} onChange={e => setMgmtQuery(e.target.value)} className="input" style={{ flex: 1 }} autoFocus />
+                    <select value={mgmtType} onChange={e => setMgmtType(e.target.value)} className="input" style={{ width: 120 }}>
+                      <option value="all">All</option>
+                      <option value="users">Users</option>
+                      <option value="vendors">Vendors</option>
+                      <option value="products">Products</option>
+                    </select>
+                  </div>
+                </div>
+                {mgmtLoading && mgmtQuery ? (
+                  <div style={{ padding: 20, color: '#888', fontSize: 12, textAlign: 'center' }}>Searching...</div>
+                ) : (
+                  <>
+                    {/* Users */}
+                    {mgmtResults.users.length > 0 && (
+                      <div className="panel" style={{ marginBottom: 12 }}>
+                        <div className="panel-head">Users ({mgmtResults.users.length})</div>
+                        {mgmtResults.users.map(u => {
+                          const expKey = `user-${u.id}`;
+                          const isExpanded = mgmtExpanded === expKey;
+                          return (
+                            <div key={u.id}>
+                              <div className="row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px 80px', gap: 10, alignItems: 'center', cursor: 'pointer' }} onClick={() => setMgmtExpanded(isExpanded ? null : expKey)}>
+                                <div><span style={{ fontWeight: 600, color: '#1976d2', textDecoration: 'underline' }}>{u.name || u.username}</span> <span style={{ fontSize: 11, color: '#888' }}>@{u.username}</span></div>
+                                <div style={{ fontSize: 12, color: '#666' }}>{u.email}</div>
+                                <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: u.blocked ? '#fde8e8' : '#e8f5e9', color: u.blocked ? '#c62828' : '#2e7d32' }}>{u.blocked ? 'Blocked' : 'Active'}</span>
+                                <span style={{ fontWeight: 600, color: '#3ea136', fontSize: 12, textAlign: 'right' }}>{money(u.balance)}</span>
+                              </div>
+                              {isExpanded && (
+                                <div style={{ padding: '8px 16px 12px', background: '#f9f9f9', borderBottom: '2px solid #3ea136' }}>
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+                                    <div><div style={{ fontSize: 10, color: '#888' }}>Role</div><div style={{ fontSize: 12, fontWeight: 600 }}>{u.role}</div></div>
+                                    <div><div style={{ fontSize: 10, color: '#888' }}>Country</div><div style={{ fontSize: 12 }}>{u.vendorCountry || 'Global'}</div></div>
+                                    <div><div style={{ fontSize: 10, color: '#888' }}>Registered</div><div style={{ fontSize: 12 }}>{new Date(u.registeredAt).toLocaleDateString()}</div></div>
+                                    <div><div style={{ fontSize: 10, color: '#888' }}>Last Login</div><div style={{ fontSize: 12 }}>{u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : 'Never'}</div></div>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                    <button className="btn btn-primary btn-sm" style={{ background: '#1976d2', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); loadUserDetail(u.id); }}>Open Detail</button>
+                                    <button className="btn btn-sm" style={{ background: '#28a745', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setEditUser(u); setEditName(u.name); setEditUsername(u.username); setEditEmail(u.email); setEditBalance(String(u.balance)); setEditRole(u.role); setEditPassword(''); }}>Edit</button>
+                                    <button className="btn btn-sm" style={{ background: '#5fa830', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setTopupUser(u); setTopupAmount(''); }}>Top-up</button>
+                                    <button className="btn btn-sm" style={{ background: '#666', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setMsgUser(u); setMsgTitle(''); setMsgBody(''); }}>Message</button>
+                                    {u.muted ? (
+                                      <button className="btn btn-sm" style={{ background: '#ff9800', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); doUserAction('unmute', u.id); }}>Unmute</button>
+                                    ) : (
+                                      <button className="btn btn-sm" style={{ background: '#666', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setMuteUser(u); setMuteDays(0); }}>Mute</button>
+                                    )}
+                                    <button className="btn btn-sm" style={{ background: '#dc3545', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); doUserAction('toggle_block', u.id, { blocked: u.blocked }); }}>{u.blocked ? 'Unblock' : 'Block'}</button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {/* Vendors */}
+                    {mgmtResults.vendors.length > 0 && (
+                      <div className="panel" style={{ marginBottom: 12 }}>
+                        <div className="panel-head">Vendors ({mgmtResults.vendors.length})</div>
+                        {mgmtResults.vendors.map(u => {
+                          const expKey = `vendor-${u.id}`;
+                          const isExpanded = mgmtExpanded === expKey;
+                          return (
+                            <div key={u.id}>
+                              <div className="row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px 80px', gap: 10, alignItems: 'center', cursor: 'pointer' }} onClick={() => setMgmtExpanded(isExpanded ? null : expKey)}>
+                                <div><span style={{ fontWeight: 600, color: '#1976d2', textDecoration: 'underline' }}>{u.name || u.username}</span> <span style={{ fontSize: 11, color: '#888' }}>@{u.username}</span></div>
+                                <div style={{ fontSize: 12, color: '#666' }}>{u.email}</div>
+                                <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: u.vendorStatus === 'approved' ? '#e8f5e9' : '#fff3cd', color: u.vendorStatus === 'approved' ? '#2e7d32' : '#856404' }}>{u.vendorStatus}</span>
+                                <span style={{ fontWeight: 600, color: '#3ea136', fontSize: 12, textAlign: 'right' }}>{money(u.balance)}</span>
+                              </div>
+                              {isExpanded && (
+                                <div style={{ padding: '8px 16px 12px', background: '#f9f9f9', borderBottom: '2px solid #3ea136' }}>
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+                                    <div><div style={{ fontSize: 10, color: '#888' }}>Status</div><div style={{ fontSize: 12, fontWeight: 600 }}>{u.vendorStatus}</div></div>
+                                    <div><div style={{ fontSize: 10, color: '#888' }}>Country</div><div style={{ fontSize: 12 }}>{u.vendorCountry || 'Global'}</div></div>
+                                    <div><div style={{ fontSize: 10, color: '#888' }}>Registered</div><div style={{ fontSize: 12 }}>{new Date(u.registeredAt).toLocaleDateString()}</div></div>
+                                    <div><div style={{ fontSize: 10, color: '#888' }}>Last Login</div><div style={{ fontSize: 12 }}>{u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : 'Never'}</div></div>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                    <button className="btn btn-primary btn-sm" style={{ background: '#1976d2', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); loadUserDetail(u.id); }}>Open Detail</button>
+                                    <button className="btn btn-sm" style={{ background: '#28a745', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setEditUser(u); setEditName(u.name); setEditUsername(u.username); setEditEmail(u.email); setEditBalance(String(u.balance)); setEditRole(u.role); setEditPassword(''); }}>Edit</button>
+                                    <button className="btn btn-sm" style={{ background: '#5fa830', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setTopupUser(u); setTopupAmount(''); }}>Top-up</button>
+                                    <button className="btn btn-sm" style={{ background: '#666', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setMsgUser(u); setMsgTitle(''); setMsgBody(''); }}>Message</button>
+                                    {u.muted ? (
+                                      <button className="btn btn-sm" style={{ background: '#ff9800', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); doUserAction('unmute', u.id); }}>Unmute</button>
+                                    ) : (
+                                      <button className="btn btn-sm" style={{ background: '#666', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setMuteUser(u); setMuteDays(0); }}>Mute</button>
+                                    )}
+                                    <button className="btn btn-sm" style={{ background: '#dc3545', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); doUserAction('toggle_block', u.id, { blocked: u.blocked }); }}>{u.blocked ? 'Unblock' : 'Block'}</button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {/* Products */}
+                    {mgmtResults.products.length > 0 && (
+                      <div className="panel" style={{ marginBottom: 12 }}>
+                        <div className="panel-head">Products ({mgmtResults.products.length})</div>
+                        {mgmtResults.products.map(p => {
+                          const expKey = `product-${p.id}`;
+                          const isExpanded = mgmtExpanded === expKey;
+                          return (
+                            <div key={p.id}>
+                              <div className="row" style={{ display: 'grid', gridTemplateColumns: '1fr 100px 60px 80px', gap: 10, alignItems: 'center', cursor: 'pointer' }} onClick={() => setMgmtExpanded(isExpanded ? null : expKey)}>
+                                <div><span style={{ fontWeight: 600 }}>{p.title}</span> <span style={{ fontSize: 11, color: '#888' }}>by @{p.vendor.username}</span></div>
+                                <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: p.status === 'approved' ? '#e8f5e9' : p.status === 'pending' ? '#fff3cd' : '#fde8e8', color: p.status === 'approved' ? '#2e7d32' : p.status === 'pending' ? '#856404' : '#c62828' }}>{p.status}</span>
+                                <span style={{ fontSize: 12, color: '#888' }}>{p.stock} stock</span>
+                                <span style={{ fontWeight: 600, color: '#3ea136', fontSize: 12, textAlign: 'right' }}>{money(p.storePrice)}</span>
+                              </div>
+                              {isExpanded && (
+                                <div style={{ padding: '8px 16px 12px', background: '#f9f9f9', borderBottom: '2px solid #3ea136' }}>
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+                                    <div><div style={{ fontSize: 10, color: '#888' }}>Platform</div><div style={{ fontSize: 12, fontWeight: 600 }}>{p.platform}</div></div>
+                                    <div><div style={{ fontSize: 10, color: '#888' }}>Category</div><div style={{ fontSize: 12 }}>{p.category}</div></div>
+                                    <div><div style={{ fontSize: 10, color: '#888' }}>Vendor Price</div><div style={{ fontSize: 12 }}>{money(p.vendorPrice)}</div></div>
+                                    <div><div style={{ fontSize: 10, color: '#888' }}>Created</div><div style={{ fontSize: 12 }}>{new Date(p.createdAt).toLocaleDateString()}</div></div>
+                                  </div>
+                                  <div style={{ fontSize: 11, color: '#666', marginBottom: 8 }}>{p.description || 'No description'}</div>
+                                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                    <button className="btn btn-sm" style={{ background: '#1976d2', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); loadProductDetail(p.id); }}>Open Detail</button>
+                                    {p.status === 'pending' && <button className="btn btn-sm" style={{ background: '#28a745', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); doProductAction('approve', p.id); }}>Approve</button>}
+                                    {p.status === 'pending' && <button className="btn btn-sm" style={{ background: '#dc3545', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setRejectProduct(p); setRejectReason(''); }}>Reject</button>}
+                                    <button className="btn btn-sm" style={{ background: '#ff9800', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); doProductAction('hold', p.id); }}>{p.status === 'hold' ? 'Unhold' : 'Hold'}</button>
+                                    <button className="btn btn-sm" style={{ background: '#28a745', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setEditProduct(p); setEpTitle(p.title); setEpDesc(p.description); setEpPrice(String(p.vendorPrice)); setEpStock(String(p.stock)); }}>Edit</button>
+                                    <button className="btn btn-sm" style={{ background: '#dc3545', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); if (confirm(`Delete ${p.title}?`)) doProductAction('delete', p.id); }}>Delete</button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {mgmtResults.users.length === 0 && mgmtResults.vendors.length === 0 && mgmtResults.products.length === 0 && mgmtQuery && !mgmtLoading && (
+                      <div style={{ padding: 20, color: '#888', fontSize: 12, textAlign: 'center' }}>No results found for "{mgmtQuery}"</div>
+                    )}
+                    {!mgmtQuery && (
+                      <div style={{ padding: 20, color: '#888', fontSize: 12, textAlign: 'center' }}>Type a search query to find users, vendors, or products</div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
             {/* ==================== ORDERS ==================== */}
             {tab === "orders" && (
               <div className="panel">
@@ -1139,10 +1456,30 @@ export function AdminDashboard() {
 
             {/* ==================== DEPOSITS ==================== */}
             {tab === "deposits" && (
-              <div className="panel">
-                <div className="panel-head">All Deposits</div>
-                <div style={{ padding: 20, color: "#888", fontSize: 13, textAlign: "center" }}>Deposit data loaded from dashboard API</div>
-              </div>
+              <>
+                <div className="panel" style={{ marginBottom: 12 }}>
+                  <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>💰 All Deposits ({allDeposits.length})</span>
+                    <button className="btn btn-sm btn-secondary" onClick={fetchDeposits}>Refresh</button>
+                  </div>
+                  {allDeposits.length === 0 ? (
+                    <div style={{ padding: 20, color: '#888', fontSize: 13, textAlign: 'center' }}>No deposits found. Deposits will appear here when users fund their accounts.</div>
+                  ) : (
+                    allDeposits.map((d: any) => (
+                      <div key={d.id} className="row" style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 80px 90px', gap: 10, alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: '#1976d2', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => d.userId && loadUserDetail(d.userId)}>{d.user?.username || d.userId}</div>
+                          <div style={{ fontSize: 11, color: '#888' }}>{d.method} · {d.txHash ? `TX: ${d.txHash.substring(0, 12)}...` : 'No TX'}</div>
+                        </div>
+                        <div style={{ fontSize: 12, color: '#666' }}>{d.network || d.method}</div>
+                        <div style={{ fontWeight: 700, color: '#3ea136', fontSize: 14 }}>{money(d.amount)}</div>
+                        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: d.status === 'completed' ? '#e8f5e9' : d.status === 'pending' ? '#fff3cd' : '#fde8e8', color: d.status === 'completed' ? '#2e7d32' : d.status === 'pending' ? '#856404' : '#c62828' }}>{d.status}</span>
+                        <span style={{ fontSize: 10, color: '#aaa', textAlign: 'right' }}>{new Date(d.createdAt).toLocaleDateString()}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
             )}
 
             {/* ==================== NOTICES ==================== */}
@@ -1333,11 +1670,115 @@ export function AdminDashboard() {
         </div>
       </div>
 
+      {/* ==================== SUPPORT CHAT ==================== */}
+      {tab === "support-chat" && (
+        <div style={{ display: 'flex', gap: 16, height: 'calc(100vh - 200px)' }}>
+          {/* Session list */}
+          <div style={{ width: 320, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+            <div className="panel" style={{ flex: 1, overflow: 'auto' }}>
+              <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Support Tickets</span>
+                <button className="btn btn-sm btn-secondary" onClick={() => fetchChatSessions(chatSessionFilter)}>Refresh</button>
+              </div>
+              <div style={{ display: 'flex', gap: 4, padding: '8px 12px', borderBottom: '1px solid #eee', flexWrap: 'wrap' }}>
+                {[{ v: '', l: 'All' }, { v: 'open', l: 'Open' }, { v: 'assigned', l: 'Assigned' }, { v: 'resolved', l: 'Resolved' }, { v: 'closed', l: 'Closed' }].map(f => (
+                  <button key={f.v} onClick={() => setChatSessionFilter(f.v)} style={{ padding: '3px 8px', fontSize: 11, borderRadius: 3, border: chatSessionFilter === f.v ? '2px solid #3ea136' : '1px solid #ddd', background: chatSessionFilter === f.v ? '#e8f5e9' : '#fff', cursor: 'pointer', fontWeight: chatSessionFilter === f.v ? 600 : 400 }}>{f.l}</button>
+                ))}
+              </div>
+              {chatSessions.length === 0 && <div style={{ padding: 20, color: '#888', fontSize: 12, textAlign: 'center' }}>No tickets</div>}
+              {chatSessions.map((s: any) => (
+                <div key={s.id} onClick={() => openChatSessionAdmin(s.id)} style={{ padding: '10px 12px', borderBottom: '1px solid #f0f0f0', cursor: 'pointer', background: activeChatSession?.id === s.id ? '#f0f7ed' : 'transparent' }} onMouseEnter={e => (e.currentTarget.style.background = '#f9f9f9')} onMouseLeave={e => (e.currentTarget.style.background = activeChatSession?.id === s.id ? '#f0f7ed' : 'transparent')}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>{s.subject}</span>
+                    {s.unreadCount > 0 && <span style={{ background: '#e53e3e', color: '#fff', fontSize: 10, padding: '2px 6px', borderRadius: 10, fontWeight: 600 }}>{s.unreadCount}</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>@{s.user?.username} · {s.category}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                    <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, background: s.status === 'open' ? '#e8f5e9' : s.status === 'assigned' ? '#e3f2fd' : '#eee', color: s.status === 'open' ? '#2e7d32' : '#1565c0' }}>{s.status}</span>
+                    <span style={{ fontSize: 10, color: '#aaa' }}>{new Date(s.updatedAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Chat area */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            {!activeChatSession ? (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontSize: 13 }}>Select a ticket to view</div>
+            ) : (
+              <>
+                <div className="panel" style={{ marginBottom: 8 }}>
+                  <div style={{ padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>{activeChatSession.subject}</div>
+                      <div style={{ fontSize: 11, color: '#888' }}>@{activeChatSession.user?.username} · {activeChatSession.category} · {activeChatSession.priority}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <select onChange={e => { if (e.target.value) assignChatSession(activeChatSession.id, e.target.value); }} style={{ padding: '4px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #ddd' }}>
+                        <option value="">Assign to...</option>
+                        {moderators.map((m: any) => <option key={m.id} value={m.id}>{m.name || m.username}</option>)}
+                      </select>
+                      <button className="btn btn-sm" style={{ background: '#7b1fa2', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={() => resolveChatSession(activeChatSession.id)}>Resolve</button>
+                    </div>
+                  </div>
+                </div>
+                <div className="panel" style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, overflow: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {activeChatMessages.map((m: any) => (
+                      <div key={m.id} style={{ display: 'flex', justifyContent: m.isAdmin ? 'flex-start' : 'flex-end' }}>
+                        <div style={{ maxWidth: '70%', padding: '8px 12px', borderRadius: 12, background: m.isAdmin ? '#e3f2fd' : '#3ea136', color: m.isAdmin ? '#333' : '#fff', fontSize: 13 }}>
+                          <div style={{ fontSize: 10, fontWeight: 600, marginBottom: 2 }}>{m.sender?.name || m.sender?.username} {m.isAdmin ? '(Support)' : '(User)'}</div>
+                          <div>{m.message}</div>
+                          <div style={{ fontSize: 9, opacity: 0.6, marginTop: 4 }}>{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ padding: '8px 12px', borderTop: '1px solid #eee', display: 'flex', gap: 6 }}>
+                    <input type="text" value={chatReplyMsg} onChange={e => setChatReplyMsg(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendChatReply()} placeholder="Type a reply..." style={{ flex: 1, padding: '8px 10px', border: '1px solid #ddd', borderRadius: 20, fontSize: 13 }} />
+                    <button onClick={sendChatReply} disabled={!chatReplyMsg.trim()} style={{ padding: '8px 16px', background: '#3ea136', color: '#fff', border: 'none', borderRadius: 20, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>Send</button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODERATORS ==================== */}
+      {tab === "moderators" && (
+        <>
+          <div className="panel" style={{ marginBottom: 12 }}>
+            <div className="panel-head">Create Moderator</div>
+            <div style={{ padding: 16, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
+              <div><label className="label">Name</label><input type="text" value={modName} onChange={e => setModName(e.target.value)} className="input" placeholder="John Doe" /></div>
+              <div><label className="label">Username</label><input type="text" value={modUsername} onChange={e => setModUsername(e.target.value)} className="input" placeholder="mod_john" /></div>
+              <div><label className="label">Email</label><input type="email" value={modEmail} onChange={e => setModEmail(e.target.value)} className="input" placeholder="john@test.com" /></div>
+              <div><label className="label">Password</label><input type="text" value={modPassword} onChange={e => setModPassword(e.target.value)} className="input" placeholder="password" /></div>
+              <button className="btn btn-primary btn-sm" onClick={createModerator}>Create</button>
+            </div>
+          </div>
+          <div className="panel">
+            <div className="panel-head">Moderators ({moderators.length})</div>
+            {moderators.length === 0 && <div style={{ padding: 20, color: '#888', fontSize: 12, textAlign: 'center' }}>No moderators yet</div>}
+            {moderators.map((m: any) => (
+              <div key={m.id} className="row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px 80px 80px', gap: 10, alignItems: 'center' }}>
+                <div><span style={{ fontWeight: 600 }}>{m.name || m.username}</span></div>
+                <div style={{ fontSize: 12, color: '#666' }}>{m.email}</div>
+                <div style={{ fontSize: 11, color: '#888' }}>Active: {m.activeSessions || 0} tickets</div>
+                <div style={{ fontSize: 11, color: '#aaa' }}>{m.lastLogin ? new Date(m.lastLogin).toLocaleDateString() : 'Never'}</div>
+                <button className="btn btn-sm" style={{ background: '#dc3545', color: '#fff', border: 'none' }} onClick={() => removeModerator(m.id)}>Remove</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       {/* ==================== RECYCLE BIN ==================== */}
       {tab === "recycle-bin" && (
         <div className="panel">
           <div className="panel-head">
-            <span>🗑️ Recycle Bin</span>
+            <span>Recycle Bin</span>
           </div>
           <div style={{ padding: 12 }}>
             {/* Filter tabs */}
@@ -1373,8 +1814,8 @@ export function AdminDashboard() {
                               </div>
                             </div>
                             <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                              <button onClick={() => handleRecycleAction("restore", type, item.id)} className="btn btn-sm" style={{ background: "#22c55e", color: "#fff", border: "none" }}>♻️ Restore</button>
-                              <button onClick={() => { if (window.confirm("Permanently delete this item?")) handleRecycleAction("permanent_delete", type, item.id); }} className="btn btn-sm" style={{ background: "#ef4444", color: "#fff", border: "none" }}>🗑️ Delete</button>
+                              <button onClick={() => handleRecycleAction("restore", type, item.id)} className="btn btn-sm" style={{ background: "#22c55e", color: "#fff", border: "none" }}>Restore</button>
+                              <button onClick={() => { if (window.confirm("Permanently delete this item?")) handleRecycleAction("permanent_delete", type, item.id); }} className="btn btn-sm" style={{ background: "#ef4444", color: "#fff", border: "none" }}>Delete</button>
                             </div>
                           </div>
                         ))}

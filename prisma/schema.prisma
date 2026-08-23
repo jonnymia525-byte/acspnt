@@ -60,7 +60,6 @@ model User {
   ticketsGiven      SupportTicket[] @relation("TicketsGiven")
   transactions      Transaction[]
   notifications     Notification[]
-  chatMessages      ChatMessage[]
   activityLogs      ActivityLog[]
   vendorRequests    VendorRequest[]
   emailLogs         EmailLog[]
@@ -72,6 +71,9 @@ model User {
   bulkCartItems     BulkCart[]
   vendorMessages    VendorMessage[]  @relation("VendorMsgReceiver")
   vendorMessagesSent VendorMessage[] @relation("VendorMsgSender")
+  chatSessions       ChatSession[] @relation("ChatUser")
+  assignedSessions   ChatSession[] @relation("ChatAssignee")
+  chatSentMessages   ChatMessage[] @relation("ChatSender")
 
   @@index([role])
   @@index([vendorStatus])
@@ -354,18 +356,6 @@ model Notification {
   @@index([userId])
 }
 
-model ChatMessage {
-  id        String   @id @default(cuid())
-  sender    String
-  message   String
-  createdAt DateTime @default(now())
-
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-
-  @@index([userId])
-}
-
 model ActivityLog {
   id          String   @id @default(cuid())
   action      String
@@ -571,4 +561,38 @@ model Webhook {
   createdAt DateTime @default(now())
 
   @@index([event])
+}
+
+model ChatSession {
+  id          String        @id @default(cuid())
+  subject     String
+  category    String        @default("general")
+  status      String        @default("open")  // open, assigned, resolved, closed
+  priority    String        @default("normal")
+  userId      String
+  user        User          @relation("ChatUser", fields: [userId], references: [id])
+  assignedTo  String?
+  assignee    User?         @relation("ChatAssignee", fields: [assignedTo], references: [id])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  messages    ChatMessage[]
+
+  @@index([userId])
+  @@index([assignedTo])
+  @@index([status])
+}
+
+model ChatMessage {
+  id          String      @id @default(cuid())
+  sessionId   String
+  session     ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  senderId    String
+  sender      User        @relation("ChatSender", fields: [senderId], references: [id])
+  message     String
+  isAdmin     Boolean     @default(false)
+  read        Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+
+  @@index([sessionId])
+  @@index([senderId])
 }

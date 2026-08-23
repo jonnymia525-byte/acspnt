@@ -9,6 +9,7 @@ import { platformColor, categoryLabel, platformLabel } from "@/lib/totp";
 import { money } from "@/lib/money";
 import { BuyModal } from "./widgets/buy-modal";
 import { ChatWidget } from "./widgets/chat-widget";
+import { ChatSupport } from "./widgets/chat-support";
 
 
 interface Vendor { id: string; username: string; vendorCountry?: string; vendorStatus?: string; }
@@ -313,8 +314,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
               <div style={{ width: 28, flexShrink: 0 }}></div>
               <span style={{ flex: 1, fontSize: 12 }}>{pg.label} Accounts</span>
               <span className="stock-col" style={{ fontSize: 11, fontWeight: 600, color: "#E6E6E6" }}>Stock</span>
-              <span className="unit-col" style={{ fontSize: 10 }}>Pcs</span>
-              <span className="price-col" style={{ fontSize: 11, fontWeight: 600, color: "#E6E6E6" }}>Price Pcs</span>
+              <span className="price-col" style={{ fontSize: 11, fontWeight: 600, color: "#E6E6E6" }}>Price</span>
               <div style={{ width: 56, flexShrink: 0, textAlign: "center" }}></div>
             </div>
 
@@ -343,23 +343,22 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
                   {listing.visible === false && <span className="tag" style={{ background: '#ff9800', color: '#fff', fontSize: 9 }}>HIDDEN</span>}
                 </div>
                 <div className="stock-col"><strong>{product.stock.toLocaleString()}</strong></div>
-                <div className="unit-col">per pc</div>
                 <div className="price-col"><span className="price-from">from </span>{money(product.storePrice)}</div>
                 {user?.role === 'admin' ? (
                   <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                    <button className="buy-btn" style={{ background: '#1976d2', padding: '6px 10px', fontSize: 11 }}
+                    <button className="buy-btn" style={{ background: '#28a745', padding: '6px 14px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 4 }}
                       onClick={e => { e.stopPropagation(); setEditListing(listing); setEditTitle(listing.title); setEditDesc(listing.deliveryFormat || ''); setEditPrice(String(product.storePrice)); setEditStock(String(product.stock)); }}>
-                      ✏️ Edit
+                      Edit
                     </button>
-                    <button className="buy-btn" style={{ background: listing.visible === false ? '#ff9800' : '#666', padding: '6px 10px', fontSize: 11 }}
+                    <button className="buy-btn" style={{ background: listing.visible === false ? '#ff9800' : '#6c757d', padding: '6px 14px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 4 }}
                       onClick={e => {
                         e.stopPropagation();
                         fetch('/api/admin/listings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'toggle_visible', listingId: listing.id }) })
                           .then(r => r.json()).then(r => { if (r.success) location.reload(); else alert(r.error || 'Failed'); });
                       }}>
-                      {listing.visible === false ? '👁 Show' : '🙈 Hide'}
+                      {listing.visible === false ? 'Show' : 'Hide'}
                     </button>
-                    <button className="buy-btn" style={{ background: '#e53e3e', padding: '6px 10px', fontSize: 11 }}
+                    <button className="buy-btn" style={{ background: '#dc3545', padding: '6px 14px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 4 }}
                       onClick={e => {
                         e.stopPropagation();
                         if (confirm(`Delete listing "${listing.title}"? This will remove all products under it.`)) {
@@ -367,7 +366,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
                             .then(r => r.json()).then(r => { if (r.success) location.reload(); else alert(r.error || 'Failed'); });
                         }
                       }}>
-                      🗑️
+                      Delete
                     </button>
                   </div>
                 ) : product.stock > 0 ? (
@@ -449,6 +448,9 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
       </footer>
 
       {buyListing && <BuyModal listing={buyListing} user={user} onClose={() => setBuyListing(null)} />}
+
+      {/* CHAT SUPPORT */}
+      <ChatSupport />
 
       {/* ADMIN EDIT MODAL */}
       {editListing && (

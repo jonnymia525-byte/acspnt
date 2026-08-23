@@ -27,7 +27,7 @@ export async function GET(req: Request) {
         id: true, title: true, description: true, platform: true, category: true,
         vendorPrice: true, storePrice: true, stock: true, status: true,
         deliveryFormat: true, countryRegister: true, originalMail: true,
-        country: true, createdAt: true, accountsData: true,
+        country: true, createdAt: true,
         vendor: { select: { id: true, username: true, name: true, vendorStatus: true } },
       },
       orderBy: { createdAt: "desc" },

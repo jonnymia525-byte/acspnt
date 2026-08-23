@@ -55,11 +55,15 @@ export async function POST(req: Request) {
     const vendorPrice = Number(body.vendorPrice);
     const accountsData = String(body.accountsData ?? "");
 
-    if (title.length < 3) return NextResponse.json({ error: "Title must be at least 3 characters" }, { status: 400 });
+    if (title.length < 3 || title.length > 200) return NextResponse.json({ error: "Title must be 3-200 characters" }, { status: 400 });
     if (!platform) return NextResponse.json({ error: "Platform is required" }, { status: 400 });
+    if (description.length > 2000) return NextResponse.json({ error: "Description too long (max 2000)" }, { status: 400 });
     if (!Number.isFinite(vendorPrice) || vendorPrice <= 0) {
       return NextResponse.json({ error: "Vendor price must be greater than 0" }, { status: 400 });
     }
+    if (vendorPrice > 100000) return NextResponse.json({ error: "Price too high" }, { status: 400 });
+    // Limit accounts payload to prevent DoS (~100KB max)
+    if (accountsData.length > 100000) return NextResponse.json({ error: "Accounts data too large" }, { status: 400 });
 
     const accounts = accountsData
       .split(/\r?\n/)

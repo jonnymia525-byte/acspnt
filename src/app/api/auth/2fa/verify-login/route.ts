@@ -93,7 +93,7 @@ export async function POST(req: Request) {
 
     // Set cookie
     const cookieStore = await cookies();
-    cookieStore.set("accsm_user_id", user.id, { httpOnly: true, path: "/", maxAge: 30 * 24 * 60 * 60 });
+    cookieStore.set("accsm_user_id", user.id, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 30 * 24 * 60 * 60 });
 
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
     await prisma.activityLog.create({ data: { action: "login_2fa", description: `User ${user.username} logged in with 2FA`, userId: user.id } });

@@ -15,12 +15,22 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   currency_symbol: "$",
 };
 
+// Only expose safe, non-sensitive settings to the public
+const PUBLIC_KEYS = new Set([
+  "site_name", "site_description", "promotion_notice",
+  "support_email", "support_telegram", "maintenance_mode",
+  "registration_enabled", "order_warranty_hours", "footer_text",
+  "primary_color", "currency_symbol",
+]);
+
 // GET - public site settings (no auth required)
 export async function GET() {
   const settings = await prisma.setting.findMany();
   const settingsMap: Record<string, string> = { ...DEFAULT_SETTINGS };
   for (const s of settings) {
-    settingsMap[s.key] = s.value;
+    if (PUBLIC_KEYS.has(s.key)) {
+      settingsMap[s.key] = s.value;
+    }
   }
 
   return NextResponse.json({ settings: settingsMap });

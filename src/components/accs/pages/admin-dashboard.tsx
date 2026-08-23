@@ -588,17 +588,14 @@ export function AdminDashboard() {
           {TABS.map(t => <button key={t} onClick={() => setTab(t)} className={`btn btn-sm ${tab === t ? "btn-primary" : "btn-secondary"}`}>{TAB_LABELS[t] || t}</button>)}
         </div>
 
-        <div style={{ display: "flex", gap: 16 }}>
-          {/* Sidebar */}
-          <div className="side hide-mobile">
-            <div style={{ padding: "12px 16px", borderBottom: "1px solid #333" }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>Admin Panel</div>
-            </div>
-            {TABS.map(t => <div key={t} className={`side-item ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>{TAB_LABELS[t] || t}</div>)}
-          </div>
+        {/* Horizontal Tabs Bar (desktop) */}
+        <div className="side hide-mobile" style={{ marginBottom: 16 }}>
+          <span className="side-label">Admin</span>
+          {TABS.map(t => <div key={t} className={`side-item ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>{TAB_LABELS[t] || t}</div>)}
+        </div>
 
-          {/* Content */}
-          <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Content */}
+        <div style={{ minWidth: 0 }}>
 
             {/* ==================== OVERVIEW ==================== */}
             {tab === "overview" && (
@@ -1466,15 +1463,32 @@ export function AdminDashboard() {
                     <div style={{ padding: 20, color: '#888', fontSize: 13, textAlign: 'center' }}>No deposits found. Deposits will appear here when users fund their accounts.</div>
                   ) : (
                     allDeposits.map((d: any) => (
-                      <div key={d.id} className="row" style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 80px 90px', gap: 10, alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: 13, color: '#1976d2', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => d.userId && loadUserDetail(d.userId)}>{d.user?.username || d.userId}</div>
-                          <div style={{ fontSize: 11, color: '#888' }}>{d.method} · {d.txHash ? `TX: ${d.txHash.substring(0, 12)}...` : 'No TX'}</div>
+                      <div key={d.id} className="row" style={{ borderBottom: '1px solid #eee', padding: 12 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 80px 90px', gap: 10, alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 13, color: '#1976d2', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => d.userId && loadUserDetail(d.userId)}>{d.user?.username || d.userId}</div>
+                            <div style={{ fontSize: 11, color: '#888' }}>{d.user?.email || ''}</div>
+                          </div>
+                          <div style={{ fontSize: 12, color: '#666' }}>{d.network || d.method}</div>
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#3ea136', fontSize: 14 }}>{money(d.amount)}</div>
+                            {d.exactAmount && <div style={{ fontSize: 10, color: '#888' }}>Exact: {d.exactAmount} USDT</div>}
+                          </div>
+                          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: d.status === 'completed' ? '#e8f5e9' : d.status === 'pending' ? '#fff3cd' : '#fde8e8', color: d.status === 'completed' ? '#2e7d32' : d.status === 'pending' ? '#856404' : '#c62828' }}>{d.status}</span>
+                          <span style={{ fontSize: 10, color: '#aaa', textAlign: 'right' }}>{new Date(d.createdAt).toLocaleDateString()}</span>
                         </div>
-                        <div style={{ fontSize: 12, color: '#666' }}>{d.network || d.method}</div>
-                        <div style={{ fontWeight: 700, color: '#3ea136', fontSize: 14 }}>{money(d.amount)}</div>
-                        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: d.status === 'completed' ? '#e8f5e9' : d.status === 'pending' ? '#fff3cd' : '#fde8e8', color: d.status === 'completed' ? '#2e7d32' : d.status === 'pending' ? '#856404' : '#c62828' }}>{d.status}</span>
-                        <span style={{ fontSize: 10, color: '#aaa', textAlign: 'right' }}>{new Date(d.createdAt).toLocaleDateString()}</span>
+                        <div style={{ marginTop: 6, display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11 }}>
+                          {d.txHash && (
+                            <div style={{ padding: '4px 8px', background: '#f5f5f5', borderRadius: 4, fontFamily: 'monospace', color: '#555', wordBreak: 'break-all', flex: '1 1 300px' }}>
+                              TX: {d.txHash}
+                            </div>
+                          )}
+                          {d.walletAddress && (
+                            <div style={{ padding: '4px 8px', background: '#f0f7ff', borderRadius: 4, fontFamily: 'monospace', color: '#555', wordBreak: 'break-all', flex: '1 1 300px' }}>
+                              Wallet: {d.walletAddress}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))
                   )}
@@ -1666,11 +1680,8 @@ export function AdminDashboard() {
                 )}
               </>
             )}
-          </div>
-        </div>
-      </div>
 
-      {/* ==================== SUPPORT CHAT ==================== */}
+        {/* ==================== SUPPORT CHAT ==================== */}
       {tab === "support-chat" && (
         <div style={{ display: 'flex', gap: 16, height: 'calc(100vh - 200px)' }}>
           {/* Session list */}
@@ -1729,7 +1740,14 @@ export function AdminDashboard() {
                         <div style={{ maxWidth: '70%', padding: '8px 12px', borderRadius: 12, background: m.isAdmin ? '#e3f2fd' : '#3ea136', color: m.isAdmin ? '#333' : '#fff', fontSize: 13 }}>
                           <div style={{ fontSize: 10, fontWeight: 600, marginBottom: 2 }}>{m.sender?.name || m.sender?.username} {m.isAdmin ? '(Support)' : '(User)'}</div>
                           <div>{m.message}</div>
-                          <div style={{ fontSize: 9, opacity: 0.6, marginTop: 4 }}>{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                          <div style={{ fontSize: 9, opacity: 0.6, marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: m.isAdmin ? 'flex-start' : 'flex-end', gap: 4 }}>
+                            {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {!m.isAdmin && (
+                              <span style={{ fontSize: 11, fontWeight: 700, color: m.read ? '#1565c0' : 'rgba(0,0,0,0.3)' }}>
+                                {m.read ? '\u2713\u2713' : '\u2713'}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -1845,6 +1863,9 @@ export function AdminDashboard() {
           </div>
         </>
       )}
+
+        </div> {/* /content */}
+      </div> {/* /wrap */}
 
       {/* ==================== MODALS ==================== */}
 

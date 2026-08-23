@@ -140,6 +140,19 @@ export async function POST(req: Request) {
     const results = await prisma.$transaction(ops);
     const purchaseId = (results[0] as { id: string }).id;
 
+    // Safety guard: if balance went negative due to race condition, refund atomically
+    const freshUser = await prisma.user.findUnique({ where: { id: user.id }, select: { balance: true } });
+    if (freshUser && freshUser.balance < 0) {
+      const restoredAccounts = deliveredAccounts + (remainingAccounts ? '\n' + remainingAccounts : '');
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: user.id }, data: { balance: { increment: Math.abs(freshUser.balance) + total } } }),
+        prisma.user.update({ where: { id: product.vendorId }, data: { balance: { decrement: vendorEarning } } }),
+        prisma.product.update({ where: { id: product.id }, data: { stock: { increment: quantity }, accountsData: restoredAccounts } }),
+        prisma.purchase.update({ where: { id: purchaseId }, data: { status: 'refunded' } }),
+      ]);
+      return NextResponse.json({ error: 'Insufficient balance due to concurrent purchase. Please try again.' }, { status: 400 });
+    }
+
     // Notify restock subscribers if stock is now 0
     if (newStock <= 0) {
       const restockNotifs = await prisma.restockNotification.findMany({

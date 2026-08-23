@@ -70,7 +70,9 @@ export async function POST(req: Request) {
     if (amount < minAmount) {
       return NextResponse.json({ error: "Minimum withdrawal is $" + minAmount }, { status: 400 });
     }
+    if (amount > 1000000) return NextResponse.json({ error: "Withdrawal amount too large" }, { status: 400 });
     if (!wallet) return NextResponse.json({ error: "Wallet is required" }, { status: 400 });
+    if (wallet.length > 200) return NextResponse.json({ error: "Wallet address too long" }, { status: 400 });
     if (user.balance < amount) {
       return NextResponse.json({ error: "Insufficient balance", balance: user.balance }, { status: 400 });
     }

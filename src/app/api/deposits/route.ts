@@ -71,6 +71,7 @@ export async function GET(req: Request) {
         txId: true,
         network: true,
         txHash: true,
+        walletAddress: true,
         createdAt: true,
         completedAt: true,
         user: { select: { id: true, username: true, email: true } },
@@ -158,6 +159,7 @@ export async function POST(req: Request) {
           exactAmount,
           method: "usdt",
           network,
+          walletAddress,
           status: "pending",
           userId,
         },
@@ -312,17 +314,12 @@ export async function POST(req: Request) {
     // ─── CHECK DEPOSIT STATUS ───────────────────────────────────────
     if (action === "check_status") {
       const { depositId } = body;
-      const deposit = await prisma.deposit.findUnique({ where: { id: depositId } });
-      if (!deposit) {
-        return NextResponse.json({ error: "Deposit not found" }, { status: 404 });
-      }
-      return NextResponse.json({
-        status: deposit.status,
-        amount: deposit.amount,
-        exactAmount: deposit.exactAmount,
-        txHash: deposit.txHash,
-        completedAt: deposit.completedAt,
-      });
+      if (!depositId) return NextResponse.json({ error: "depositId required" }, { status: 400 });
+      const deposit = await prisma.deposit.findUnique({ where: { id: depositId }, select: { userId: true, status: true, amount: true, exactAmount: true, txHash: true, completedAt: true } });
+      if (!deposit) return NextResponse.json({ error: "Deposit not found" }, { status: 404 });
+      // Ownership check — only the deposit owner can check status
+      if (deposit.userId !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return NextResponse.json({ status: deposit.status, amount: deposit.amount, exactAmount: deposit.exactAmount, txHash: deposit.txHash, completedAt: deposit.completedAt });
     }
 
     return NextResponse.json(

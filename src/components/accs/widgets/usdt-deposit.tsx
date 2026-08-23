@@ -209,17 +209,33 @@ export function USDTDeposit() {
             </div>
 
             {/* Warning */}
-            <div style={{ fontSize: 12, color: "#e65100", background: "#fff3e0", padding: 10, borderRadius: 6, lineHeight: 1.5 }}>
-              Send the exact amount shown above. Do not send from an exchange.
+            <div style={{ fontSize: 12, color: "#d32f2f", fontWeight: 700, background: "#fff3e0", padding: 10, borderRadius: 6, lineHeight: 1.5 }}>
+              Send the exact amount shown above
             </div>
 
             {/* QR */}
             <div style={{ textAlign: "center" }}>
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(`ton://transfer/${result.walletAddress}?amount=${result.exactAmount}`)}`}
-                alt="QR Code"
-                style={{ width: 180, height: 180, borderRadius: 6, border: "1px solid #eee" }}
-              />
+              <div style={{ position: "relative", display: "inline-block", width: 180, height: 180 }}>
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(result.walletAddress)}`}
+                  alt="QR Code"
+                  style={{ width: 180, height: 180, borderRadius: 6, border: "1px solid #eee", display: "block" }}
+                />
+                {/* USDT logo overlay in center — purely visual, does not affect QR scanning */}
+                <div style={{
+                  position: "absolute", top: "50%", left: "50%",
+                  transform: "translate(-50%, -50%)",
+                  width: 36, height: 36, borderRadius: 6,
+                  background: "#fff", display: "flex",
+                  alignItems: "center", justifyContent: "center",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.15)",
+                }}>
+                  <svg width="28" height="28" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="16" cy="16" r="16" fill="#26A17B"/>
+                    <path fill="#FFF" d="M17.922 17.383v-.002c-.11.008-.677.042-1.942.042-1.01 0-1.721-.03-1.971-.042v.003c-3.888-.171-6.79-.848-6.79-1.658 0-.809 2.902-1.486 6.79-1.66v2.644c.254.018.982.061 1.988.061 1.207 0 1.812-.05 1.925-.06v-2.643c3.88.173 6.775.85 6.775 1.658 0 .81-2.895 1.485-6.775 1.657m0-3.59v-2.366h5.414V7.819H8.595v3.608h5.414v2.365c-4.4.202-7.709 1.074-7.709 2.118 0 1.044 3.309 1.915 7.709 2.118v7.582h3.913v-7.584c4.393-.202 7.694-1.073 7.694-2.116 0-1.043-3.301-1.914-7.694-2.117"/>
+                  </svg>
+                </div>
+              </div>
             </div>
 
             {/* Wallet address */}
@@ -261,8 +277,7 @@ export function USDTDeposit() {
                 style={{ width: "100%", padding: "10px 12px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13, fontFamily: "monospace", boxSizing: "border-box" }}
               />
               <p style={{ fontSize: 11, color: "#888", marginTop: 4 }}>
-                Find this in your wallet after sending. Verify on{" "}
-                <a href={result.explorerUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#1976d2" }}>{result.explorer}</a>
+                Paste your Transaction id to verify your payment
               </p>
             </div>
 
@@ -288,6 +303,14 @@ export function USDTDeposit() {
                 {verifyLoading ? "Submitting..." : "Confirm Deposit"}
               </button>
             </div>
+
+            <button
+              onClick={() => window.location.href = '/?page=support'}
+              style={{ width: '100%', padding: '10px 0', borderRadius: 6, border: '1px solid #1976d2', background: '#e3f2fd', color: '#1976d2', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            >
+              <svg viewBox="0 0 24 24" style={{ width: 16, height: 16, fill: '#1976d2' }}><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+              Contact Support — Need help with payment?
+            </button>
           </div>
         )}
 

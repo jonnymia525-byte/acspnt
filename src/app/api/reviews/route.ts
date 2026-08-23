@@ -40,6 +40,7 @@ export async function POST(req: Request) {
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       return NextResponse.json({ error: "Rating must be between 1 and 5" }, { status: 400 });
     }
+    if (comment.length > 2000) return NextResponse.json({ error: "Comment too long (max 2000)" }, { status: 400 });
 
     const review = await prisma.review.create({
       data: { rating, comment, buyerId: user.id, vendorId, productId, listingId },

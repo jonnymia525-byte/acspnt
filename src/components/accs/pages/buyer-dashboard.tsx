@@ -76,24 +76,19 @@ export function BuyerDashboard() {
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: 16 }}>
-          {/* Sidebar */}
-          <div className="side hide-mobile">
-            <div style={{ padding: "12px 16px", borderBottom: "1px solid #333" }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>{data.user.name}</div>
-              <div style={{ fontSize: 11, color: "#666" }}>Buyer</div>
-              <div style={{ marginTop: 8, fontSize: 18, fontWeight: 700, color: "#5fa830" }}>{money(data.user.balance)}</div>
+        {/* Horizontal Tabs Bar (desktop) */}
+        <div className="side hide-mobile" style={{ marginBottom: 16 }}>
+          <span className="side-label">{data.user.name}</span>
+          {TABS.map(t => (
+            <div key={t.key} className={`side-item ${tab === t.key ? "on" : ""}`} onClick={() => setTab(t.key)}>
+              {t.label}
+              {t.key === "disputes" && data.stats.openDisputes > 0 && <span className="dot">{data.stats.openDisputes}</span>}
             </div>
-            {TABS.map(t => (
-              <div key={t.key} className={`side-item ${tab === t.key ? "on" : ""}`} onClick={() => setTab(t.key)}>
-                {t.label}
-                {t.key === "disputes" && data.stats.openDisputes > 0 && <span className="dot">{data.stats.openDisputes}</span>}
-              </div>
-            ))}
-          </div>
+          ))}
+        </div>
 
-          {/* Content */}
-          <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Content */}
+        <div style={{ minWidth: 0 }}>
             {tab === "overview" && (
               <>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 16 }}>
@@ -230,10 +225,8 @@ export function BuyerDashboard() {
                 ))}
               </div>
             )}
-          </div>
         </div>
       </div>
-
 
       {/* Report Modal */}
       {reportId && (

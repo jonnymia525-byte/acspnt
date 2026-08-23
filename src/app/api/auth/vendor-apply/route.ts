@@ -45,7 +45,7 @@ export async function POST(req: Request) {
     // Set cookie
     const { cookies } = await import("next/headers");
     const cookieStore = await cookies();
-    cookieStore.set("accsm_user_id", user.id, { httpOnly: true, path: "/", maxAge: 30 * 24 * 60 * 60 });
+    cookieStore.set("accsm_user_id", user.id, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 30 * 24 * 60 * 60 });
 
     await prisma.activityLog.create({ data: { action: "vendor_request", description: `Vendor application from ${firstName} ${lastName}`, userId: user.id } });
 

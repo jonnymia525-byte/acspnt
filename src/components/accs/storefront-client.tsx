@@ -165,6 +165,8 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
   const [socialLinks, setSocialLinks] = useState<Record<string, string>>({});
   const catRef = useRef<HTMLDivElement>(null);
   const langRef = useRef<HTMLDivElement>(null);
+  // Notification badges
+  const [notifCount, setNotifCount] = useState(0);
 
   useEffect(() => {
     fetch("/api/auth/me").then(r => r.json()).then(d => { if (d.user) setUser(d.user); }).catch(() => {});
@@ -183,6 +185,25 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
       }
     }).catch(() => {});
   }, [setUser]);
+
+  // Fetch notification count after user is loaded
+  useEffect(() => {
+    if (!user) return;
+    if (user.role === "admin") {
+      fetch("/api/dashboard/admin").then(r => r.json()).then(d => {
+        setNotifCount((d.stats?.pendingProducts || 0) + (d.stats?.openDisputes || 0) + (d.pendingVendorRequests?.length || 0));
+      }).catch(() => {});
+    } else if (user.role === "vendor") {
+      fetch("/api/dashboard/vendor").then(r => r.json()).then(d => {
+        setNotifCount((d.stats?.pendingProducts || 0) + (d.stats?.pendingWithdrawals || 0) + (d.stockAlerts?.lowStock?.length || 0));
+      }).catch(() => {});
+    } else {
+      fetch("/api/dashboard/buyer").then(r => r.json()).then(d => {
+        const unread = (d.notifications || []).filter((n: any) => !n.read).length;
+        setNotifCount((d.stats?.openDisputes || 0) + unread);
+      }).catch(() => {});
+    }
+  }, [user]);
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
@@ -213,7 +234,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
         {!user && <><Link href="/?page=register" className="btn-signup">+ Sign Up</Link>
         <Link href="/?page=login" className="btn-login">Login</Link></>}
         {user && <>
-          <a href={dashUrl(user.role)} style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#3ea136", borderRadius: 3, textDecoration: "none", fontWeight: 600 }}>Dashboard</a>
+          <a href={dashUrl(user.role)} style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#3ea136", borderRadius: 3, textDecoration: "none", fontWeight: 600, position: "relative", display: "inline-flex", alignItems: "center" }}>Dashboard{notifCount > 0 && <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>{notifCount}</span>}</a>
           <Link href="/?page=deposit" style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#5fa830", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 600, textDecoration: "none" }}>Deposit</Link>
           <span style={{ color: "#5fa830", fontSize: 12, fontWeight: 700 }}>{money(user.balance)}</span>
           <button onClick={logout} style={{ color: "#aaa", fontSize: 11, background: "none", border: "none", cursor: "pointer" }}>Logout</button>
@@ -241,7 +262,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
         <Link href="/?page=faq">FAQ</Link>
         <Link href="/?page=rules">Terms of use</Link>
         {!user && <Link href="/?page=seller-register" className="nav-seller">Become a seller</Link>}
-        {user && <a href={dashUrl(user.role)} style={{ color: "#5fa830", fontWeight: 600, marginLeft: 8 }}>Dashboard</a>}
+        {user && <a href={dashUrl(user.role)} style={{ color: "#5fa830", fontWeight: 600, marginLeft: 8, position: "relative", display: "inline-flex", alignItems: "center" }}>Dashboard{notifCount > 0 && <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>{notifCount}</span>}</a>}
       </div>
 
       {/* HEADER: Logo + Category + Search */}
@@ -278,7 +299,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
 
       {/* NOTICE */}
       {siteNotice && (
-        <div className="notice" dangerouslySetInnerHTML={{ __html: siteNotice.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/on\w+="[^"]*"/gi, '').replace(/accspoint\.news/g, '<a href="#">accspoint.news</a>') }} />
+        <div className="notice" dangerouslySetInnerHTML={{ __html: siteNotice.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<iframe[\s\S]*?<\/iframe>/gi, '').replace(/<object[\s\S]*?<\/object>/gi, '').replace(/<embed[^>]*\/?>/gi, '').replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '').replace(/javascript:/gi, '').replace(/data:/gi, '').replace(/accspoint\.news/g, '<a href="#">accspoint.news</a>') }} />
       )}
 
       {/* BREADCRUMBS */}

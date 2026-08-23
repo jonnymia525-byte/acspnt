@@ -3,6 +3,19 @@ import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import crypto from "crypto";
 
+// Block internal/private URLs to prevent SSRF
+function isSafeUrl(urlStr: string): boolean {
+  try {
+    const url = new URL(urlStr);
+    if (!['http:', 'https:'].includes(url.protocol)) return false;
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0') return false;
+    if (hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.')) return false;
+    if (hostname.endsWith('.local') || hostname.endsWith('.internal') || hostname.endsWith('.localhost')) return false;
+    return true;
+  } catch { return false; }
+}
+
 async function requireAdmin() {
   const cookieStore = await cookies();
   const userId = cookieStore.get("accsm_user_id")?.value;
@@ -27,10 +40,9 @@ export async function POST(req: Request) {
   if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
-  const { action, webhookId, url, event, secret, active } = body;
-
-  if (action === "create") {
+  const { action, webhookId, url, event, secret, active } = body;    if (action === "create") {
     if (!url || !event) return NextResponse.json({ error: "url and event required" }, { status: 400 });
+    if (!isSafeUrl(url)) return NextResponse.json({ error: "URL must be a public http/https address" }, { status: 400 });
     const webhookSecret = secret || crypto.randomBytes(16).toString("hex");
     const webhook = await prisma.webhook.create({
       data: { url, event, secret: webhookSecret, active: active !== false },
@@ -55,12 +67,17 @@ export async function POST(req: Request) {
   if (action === "test" && webhookId) {
     const webhook = await prisma.webhook.findUnique({ where: { id: webhookId } });
     if (!webhook) return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
+    if (!isSafeUrl(webhook.url)) return NextResponse.json({ error: "Webhook URL is not safe" }, { status: 400 });
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
       await fetch(webhook.url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ event: "test", timestamp: new Date().toISOString(), message: "Test webhook from AccsPoint" }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       return NextResponse.json({ success: true, message: "Test webhook sent" });
     } catch {
       return NextResponse.json({ error: "Failed to send test webhook" }, { status: 500 });

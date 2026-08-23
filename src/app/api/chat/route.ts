@@ -43,7 +43,19 @@ export async function GET(req: Request) {
       assignee: { select: { username: true, name: true } },
     },
   });
-  return NextResponse.json({ sessions });
+  // Compute actual unread admin message count per session
+  const sessionIds = sessions.map(s => s.id);
+  const unreadRows = await prisma.chatMessage.groupBy({
+    by: ["sessionId"],
+    where: { sessionId: { in: sessionIds }, isAdmin: true, read: false, senderId: { not: userId } },
+    _count: { id: true },
+  });
+  const unreadMap = new Map(unreadRows.map(r => [r.sessionId, r._count.id]));
+  const sessionsWithUnread = sessions.map(s => ({
+    ...s,
+    unreadCount: unreadMap.get(s.id) || 0,
+  }));
+  return NextResponse.json({ sessions: sessionsWithUnread });
 }
 
 // POST - create new session or send message in existing session
@@ -58,6 +70,16 @@ export async function POST(req: Request) {
   if (action === "create_session") {
     if (!subject?.trim() || !message?.trim()) {
       return NextResponse.json({ error: "Subject and message required" }, { status: 400 });
+    }
+    if (subject.length > 200 || message.length > 5000) {
+      return NextResponse.json({ error: "Input too long" }, { status: 400 });
+    }
+    // Rate limit: max 5 new tickets per user per hour
+    const recentTickets = await prisma.chatSession.count({
+      where: { userId, createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) } },
+    });
+    if (recentTickets >= 5) {
+      return NextResponse.json({ error: "Too many tickets. Please wait before creating another." }, { status: 429 });
     }
     const session = await prisma.chatSession.create({
       data: { subject: subject.trim(), category: category || "general", priority: priority || "normal", userId },
@@ -74,6 +96,9 @@ export async function POST(req: Request) {
   if (action === "send_message") {
     if (!sessionId || !message?.trim()) {
       return NextResponse.json({ error: "sessionId and message required" }, { status: 400 });
+    }
+    if (message.length > 5000) {
+      return NextResponse.json({ error: "Message too long (max 5000 characters)" }, { status: 400 });
     }
     const session = await prisma.chatSession.findUnique({ where: { id: sessionId } });
     if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });

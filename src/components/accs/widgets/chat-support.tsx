@@ -56,9 +56,32 @@ export function ChatSupport() {
     } catch {}
   };
 
+  const [unreadCount, setUnreadCount] = useState(0);
+
   useEffect(() => {
     if (isOpen && user) fetchSessions();
   }, [isOpen, user]);
+
+  // Poll for unread count even when widget is closed
+  useEffect(() => {
+    if (!user) return;
+    const checkUnread = () => {
+      fetch("/api/chat").then(r => r.json()).then(d => {
+        const sessions = d.sessions || [];
+        let unread = 0;
+        for (const s of sessions) {
+          // Use server-computed unreadCount from groupBy query
+          unread += s.unreadCount || 0;
+        }
+        setUnreadCount(unread);
+        // Also update sessions list so badge in list view is fresh
+        setSessions(sessions);
+      }).catch(() => {});
+    };
+    checkUnread();
+    const interval = setInterval(checkUnread, 15000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   useEffect(() => {
     if (activeSession) {
@@ -71,6 +94,9 @@ export function ChatSupport() {
   const openSession = (session: ChatSession) => {
     setActiveSession(session);
     setView("chat");
+    // Refresh sessions after opening so unread count updates
+    // (server marks messages as read when fetching them)
+    setTimeout(() => fetchSessions(), 1000);
   };
 
   const sendMessage = async () => {
@@ -120,7 +146,7 @@ export function ChatSupport() {
       {/* Floating button */}
       {!isOpen && (
         <button
-          onClick={() => setIsOpen(true)}
+          onClick={() => { setIsOpen(true); setUnreadCount(0); }}
           style={{
             position: "fixed", bottom: 20, right: 20, zIndex: 9999,
             background: "#3ea136", color: "#fff", border: "none", borderRadius: 28,
@@ -130,6 +156,9 @@ export function ChatSupport() {
         >
           <svg viewBox="0 0 24 24" width="20" height="20" fill="#fff"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
           Contact Support
+          {unreadCount > 0 && (
+            <span style={{ position: "absolute", top: -4, right: -4, background: "#e53e3e", color: "#fff", fontSize: 11, minWidth: 20, height: 20, padding: "0 5px", borderRadius: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{unreadCount}</span>
+          )}
         </button>
       )}
 
@@ -180,11 +209,16 @@ export function ChatSupport() {
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span style={{ fontWeight: 600, fontSize: 13 }}>{s.subject}</span>
-                      <span style={{
-                        fontSize: 10, padding: "2px 8px", borderRadius: 10, fontWeight: 600,
-                        background: s.status === "open" ? "#e8f5e9" : s.status === "assigned" ? "#e3f2fd" : s.status === "resolved" ? "#f3e5f5" : "#eee",
-                        color: s.status === "open" ? "#2e7d32" : s.status === "assigned" ? "#1565c0" : s.status === "resolved" ? "#7b1fa2" : "#666",
-                      }}>{s.status}</span>
+                      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                        {s.unreadCount && s.unreadCount > 0 && (
+                          <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{s.unreadCount}</span>
+                        )}
+                        <span style={{
+                          fontSize: 10, padding: "2px 8px", borderRadius: 10, fontWeight: 600,
+                          background: s.status === "open" ? "#e8f5e9" : s.status === "assigned" ? "#e3f2fd" : s.status === "resolved" ? "#f3e5f5" : "#eee",
+                          color: s.status === "open" ? "#2e7d32" : s.status === "assigned" ? "#1565c0" : s.status === "resolved" ? "#7b1fa2" : "#666",
+                        }}>{s.status}</span>
+                      </div>
                     </div>
                     <div style={{ fontSize: 11, color: "#888", marginTop: 4, display: "flex", justifyContent: "space-between" }}>
                       <span>{s.category} · {s.priority}</span>
@@ -245,20 +279,32 @@ export function ChatSupport() {
               <>
                 <button onClick={() => { setView("list"); setActiveSession(null); }} style={{ background: "none", border: "none", color: "#3ea136", cursor: "pointer", fontSize: 13, textAlign: "left", padding: "8px 16px", borderBottom: "1px solid #f0f0f0" }}>&larr; Back to tickets</button>
                 <div style={{ flex: 1, overflow: "auto", padding: "8px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
-                  {messages.map(m => (
-                    <div key={m.id} style={{ display: "flex", justifyContent: m.isAdmin ? "flex-start" : "flex-end" }}>
-                      <div style={{
-                        maxWidth: "80%", padding: "8px 12px", borderRadius: 12,
-                        background: m.isAdmin ? "#e3f2fd" : "#3ea136",
-                        color: m.isAdmin ? "#333" : "#fff",
-                        fontSize: 13,
-                      }}>
-                        {m.isAdmin && <div style={{ fontSize: 10, fontWeight: 600, color: "#1976d2", marginBottom: 2 }}>{m.sender.name || m.sender.username} (Support)</div>}
-                        <div>{m.message}</div>
-                        <div style={{ fontSize: 9, opacity: 0.6, marginTop: 4, textAlign: "right" }}>{new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                  {messages.map(m => {
+                    const isOwnMessage = !m.isAdmin && m.sender?.id === user?.id;
+                    const isAdminMsg = m.isAdmin;
+                    return (
+                      <div key={m.id} style={{ display: "flex", justifyContent: isAdminMsg ? "flex-start" : "flex-end" }}>
+                        <div style={{
+                          maxWidth: "80%", padding: "8px 12px", borderRadius: 12,
+                          background: isAdminMsg ? "#e3f2fd" : "#3ea136",
+                          color: isAdminMsg ? "#333" : "#fff",
+                          fontSize: 13,
+                        }}>
+                          {isAdminMsg && <div style={{ fontSize: 10, fontWeight: 600, color: "#1976d2", marginBottom: 2 }}>{m.sender?.name || m.sender?.username} (Support)</div>}
+                          <div>{m.message}</div>
+                          <div style={{ fontSize: 9, opacity: 0.6, marginTop: 4, textAlign: "right", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+                            {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            {/* Read receipts: only show for own messages (user-sent) */}
+                            {!isAdminMsg && (
+                              <span style={{ fontSize: 11, fontWeight: 700, color: m.read ? "#fff" : "rgba(255,255,255,0.5)" }}>
+                                {m.read ? "✓✓" : "✓"}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <div ref={messagesEnd} />
                 </div>
                 {activeSession.status !== "closed" && activeSession.status !== "resolved" ? (

@@ -23,6 +23,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Product not found or not yours" }, { status: 404 });
     }
 
+    // Limit payload size
+    if (accountsData.length > 100000) return NextResponse.json({ error: "Accounts data too large" }, { status: 400 });
+
     const accounts = accountsData
       .split(/\r?\n/)
       .map((line: string) => line.trim())
@@ -30,6 +33,9 @@ export async function POST(req: Request) {
 
     if (accounts.length === 0) {
       return NextResponse.json({ error: "At least one account is required" }, { status: 400 });
+    }
+    if (accounts.length > 10000) {
+      return NextResponse.json({ error: "Too many accounts at once (max 10,000)" }, { status: 400 });
     }
 
     // Append new accounts to existing accountsData

@@ -35,6 +35,14 @@ export async function POST(req: Request) {
     const vendorId = body.vendorId ? String(body.vendorId) : null;
 
     if (reason.length < 10) return NextResponse.json({ error: "Reason must be at least 10 characters" }, { status: 400 });
+    if (reason.length > 5000) return NextResponse.json({ error: "Reason too long" }, { status: 400 });
+    // Rate limit: max 5 disputes per user per day
+    const recentDisputes = await prisma.dispute.count({
+      where: { buyerId: user.id, createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+    });
+    if (recentDisputes >= 5) {
+      return NextResponse.json({ error: "Too many disputes. Please wait 24 hours." }, { status: 429 });
+    }
 
     const dispute = await prisma.dispute.create({
       data: { reason, status: "open", buyerId: user.id, purchaseId: purchaseId || null, productId, vendorId },

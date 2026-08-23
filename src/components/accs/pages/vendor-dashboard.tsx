@@ -17,13 +17,7 @@ interface Data {
   stockAlerts: { lowStock: Array<{ id: string; title: string; stock: number }>; outOfStock: Array<{ id: string; title: string }> };
 }
 
-const METHODS = [
-  { key: "usdt_trc20", label: "USDT (TRC20)", min: 10, fee: 1, ph: "T..." },
-  { key: "btc", label: "Bitcoin (BTC)", min: 20, fee: 2, ph: "bc1..." },
-  { key: "eth", label: "Ethereum (ETH)", min: 20, fee: 5, ph: "0x..." },
-  { key: "paypal", label: "PayPal", min: 20, fee: 0, ph: "you@email.com" },
-  { key: "bank", label: "Bank Transfer", min: 100, fee: 0, ph: "IBAN..." },
-];
+
 
 const PLATFORMS = ["instagram","facebook","telegram","x","tiktok","linkedin","gmail","outlook","discord","reddit","youtube","pinterest","snapchat"];
 const CATEGORIES = ["fresh","aged","verified","bulk","follower","storage"];
@@ -39,7 +33,13 @@ const TABS = [
 
 export function VendorDashboard() {
   const { setUser } = useStore();
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('tab') || 'overview';
+    }
+    return 'overview';
+  });
   const [data, setData] = useState<Data | null>(null);
 
   // Add listing form
@@ -57,11 +57,17 @@ export function VendorDashboard() {
   const [uploadProductId, setUploadProductId] = useState<string | null>(null);
   const [uploadAccounts, setUploadAccounts] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [dupes, setDupes] = useState<Array<{ line: string; index: number; productId?: string; productTitle?: string }>>([]);
+  const [checkingDupes, setCheckingDupes] = useState(false);
 
   // Withdrawal
-  const [wdMethod, setWdMethod] = useState("usdt_trc20");
+  const [wdNetwork, setWdNetwork] = useState("bep20");
   const [wdAmount, setWdAmount] = useState("");
   const [wdWallet, setWdWallet] = useState("");
+  const [wdSuccess, setWdSuccess] = useState<any>(null);
+  const [wdError, setWdError] = useState("");
+  const [wdLoading, setWdLoading] = useState(false);
+  const [wdNetworks, setWdNetworks] = useState<Array<{id: string; label: string; min: number; fee: number}>>([]);
 
   // Price editing
   const [editProductId, setEditProductId] = useState<string | null>(null);
@@ -77,13 +83,65 @@ export function VendorDashboard() {
 
   useEffect(() => { refresh(); }, [setUser]);
 
+  const [sellerSupportLink, setSellerSupportLink] = useState("");
+
+  useEffect(() => {
+    fetch("/api/settings").then(r => r.json()).then(d => {
+      if (d.settings?.seller_support_telegram) setSellerSupportLink(d.settings.seller_support_telegram);
+    }).catch(() => {});
+  }, []);
+
   if (!data) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f5f5f5" }}>Loading...</div>;
+
+  // Pending approval - restrict all access
+  if (data.user.vendorStatus !== "approved") {
+    return (
+      <div style={{ minHeight: "100vh", background: "#f5f5f5" }}>
+        <div className="topbar">
+          <div className="news-link"><span className="news-dot" /> News</div>
+          <Link href="/" style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#3ea136", borderRadius: 3, textDecoration: "none", fontWeight: 600 }}>Store</Link>
+          <span style={{ color: "#5fa830", fontSize: 12, fontWeight: 700 }}>${data.user.balance.toFixed(2)}</span>
+          <span style={{ color: "#888", fontSize: 11 }}>{data.user.name || data.user.username}</span>
+        </div>
+        <div style={{ minHeight: "calc(100vh - 40px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ maxWidth: 440, background: "#fff", borderRadius: 12, padding: "40px 32px", textAlign: "center", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", border: "1px solid #e0e0e0" }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>&#9203;</div>
+            <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 12, color: "#333" }}>Wait for Approval</h1>
+            <p style={{ fontSize: 14, color: "#666", lineHeight: 1.6, marginBottom: 8 }}>
+              Your account is currently pending review by an administrator.
+            </p>
+            <p style={{ fontSize: 14, color: "#666", lineHeight: 1.6, marginBottom: 24 }}>
+              You will be notified once your account is approved.
+            </p>
+            <div style={{ background: "#f0f7ff", border: "1px solid #b3d4fc", borderRadius: 8, padding: 16, marginBottom: 20 }}>
+              <p style={{ fontSize: 13, color: "#1565c0", marginBottom: 12 }}>For any urgent inquiries, please contact our support team:</p>
+              <a
+                href={sellerSupportLink ? (sellerSupportLink.startsWith("http") ? sellerSupportLink : `https://t.me/${sellerSupportLink.replace("@", "")}`) : "https://t.me/accspoint_support"}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 24px", borderRadius: 6, background: "#0088cc", color: "#fff", fontSize: 14, fontWeight: 600, textDecoration: "none", cursor: "pointer" }}
+              >
+                <svg viewBox="0 0 24 24" style={{ width: 18, height: 18, fill: "#fff" }}><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 11.944 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+                Contact Seller Support
+              </a>
+            </div>
+            <Link href="/" style={{ fontSize: 13, color: "#5fa830", textDecoration: "none" }}>&larr; Back to Store</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const createProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch("/api/vendor/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle, platform: newPlat, category: newCat, description: newDesc, vendorPrice: parseFloat(newPrice), countryRegister: newCountry, deliveryFormat: newFormat, originalMail: newOriginalMail }) });
+    // Validate delivery format: must be colon-separated alphanumeric names
+    if (!newFormat.trim() || !/^([a-zA-Z0-9_]+)(:[a-zA-Z0-9_]+)*$/.test(newFormat.trim())) {
+      alert("Delivery format must use colon-separated names (e.g. name:pass:email:emailpass:gender)");
+      return;
+    }
+    const res = await fetch("/api/vendor/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle, platform: newPlat, category: newCat, description: newDesc, vendorPrice: parseFloat(newPrice), countryRegister: newCountry, deliveryFormat: newFormat.trim(), originalMail: newOriginalMail }) });
     const r = await res.json();
-    if (r.success) { setNewTitle(""); setNewDesc(""); setNewPrice(""); setNewAccounts(""); setNewCountry(""); alert("Listing created! Now upload your accounts."); setTab("my-products"); refresh(); } else alert(r.error);
+    if (r.success) { setNewTitle(""); setNewDesc(""); setNewPrice(""); setNewAccounts(""); setNewCountry(""); setNewFormat("email:pass"); alert("Listing created! Now upload your accounts."); setTab("my-products"); refresh(); } else alert(r.error);
   };
 
   const uploadMore = async (e: React.FormEvent) => {
@@ -93,7 +151,35 @@ export function VendorDashboard() {
     const res = await fetch("/api/vendor/products/upload-more", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productId: uploadProductId, accountsData: uploadAccounts }) });
     const r = await res.json();
     setUploading(false);
-    if (r.success) { alert(`Uploaded ${r.added} accounts. Pending admin approval.`); setUploadProductId(null); setUploadAccounts(""); refresh(); } else alert(r.error);
+    if (r.success) { alert(`Uploaded ${r.added} accounts. Pending admin approval.`); setUploadProductId(null); setUploadAccounts(""); setDupes([]); refresh(); } else alert(r.error);
+  };
+
+  const checkDuplicates = async () => {
+    if (!uploadAccounts.trim()) return;
+    setCheckingDupes(true);
+    try {
+      const params = new URLSearchParams({ accounts: uploadAccounts });
+      if (uploadProductId) params.set("productId", uploadProductId);
+      const res = await fetch(`/api/vendor/products/upload-more?${params}`);
+      const r = await res.json();
+      setDupes(r.duplicates || []);
+      if ((r.duplicateCount || 0) === 0) {
+        alert("No duplicates found!");
+      } else {
+        alert(`Found ${r.duplicateCount} duplicate(s) out of ${r.total} accounts.`);
+      }
+    } catch {
+      alert("Failed to check duplicates");
+    }
+    setCheckingDupes(false);
+  };
+
+  const removeDuplicateLines = () => {
+    const dupeIndices = new Set(dupes.map(d => d.index));
+    const lines = uploadAccounts.split("\n");
+    const filtered = lines.filter((_, i) => !dupeIndices.has(i));
+    setUploadAccounts(filtered.join("\n"));
+    setDupes([]);
   };
 
   const updatePrice = async (productId: string) => {
@@ -116,12 +202,39 @@ export function VendorDashboard() {
 
   const withdraw = async (e: React.FormEvent) => {
     e.preventDefault();
-    const mi = METHODS.find(m => m.key === wdMethod)!;
-    if (parseFloat(wdAmount) < mi.min) { alert(`Min $${mi.min}`); return; }
-    const res = await fetch("/api/withdrawals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount: parseFloat(wdAmount), method: wdMethod, wallet: wdWallet }) });
-    const r = await res.json();
-    if (r.success) { alert(`Submitted. Net: $${r.withdrawal.netAmount}`); setWdAmount(""); setWdWallet(""); refresh(); } else alert(r.error);
+    setWdError("");
+    const amt = parseFloat(wdAmount);
+    if (!wdAmount || isNaN(amt)) { setWdError("Please enter a valid withdrawal amount."); return; }
+    const net = wdNetworks.find(n => n.id === wdNetwork);
+    if (!net) { setWdError("Please select a payment network."); return; }
+    if (amt < net.min) { setWdError(`Minimum withdrawal amount is $${net.min}.`); return; }
+    if (amt > (data?.user.balance || 0)) { setWdError(`Amount exceeds your available balance of $${(data?.user.balance || 0).toFixed(2)}.`); return; }
+    if (!wdWallet.trim()) { setWdError("Please enter your wallet address."); return; }
+    // Validate wallet format
+    const walletPatterns: Record<string, RegExp> = { bep20: /^0x[0-9a-fA-F]{40}$/, trc20: /^T[0-9a-zA-Z]{33}$/, erc20: /^0x[0-9a-fA-F]{40}$/ };
+    if (walletPatterns[wdNetwork] && !walletPatterns[wdNetwork].test(wdWallet.trim())) {
+      setWdError(`Please enter a valid ${net.label} wallet address.`);
+      return;
+    }
+    setWdLoading(true);
+    try {
+      const res = await fetch("/api/withdrawals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ network: wdNetwork, amount: amt, wallet: wdWallet.trim() }) });
+      const r = await res.json();
+      if (r.success) {
+        setWdSuccess({ ...r.withdrawal, requestId: `WD-${Date.now()}` });
+        setWdAmount(""); setWdWallet(""); setWdError("");
+        refresh();
+      } else { setWdError(r.error || "Withdrawal failed"); }
+    } catch { setWdError("Network error. Please try again."); }
+    setWdLoading(false);
   };
+
+  // Fetch withdrawal networks on mount
+  useEffect(() => {
+    fetch("/api/withdrawals").then(r => r.json()).then(d => {
+      if (d.networks) setWdNetworks(d.networks);
+    }).catch(() => {});
+  }, []);
 
   const vp = parseFloat(newPrice) || 0;
   const autoTitle = newPlat && newCat ? `${platformLabel(newPlat)} ${newCat.charAt(0).toUpperCase() + newCat.slice(1)} Account` : "";
@@ -262,14 +375,25 @@ export function VendorDashboard() {
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     <div>
-                      <label className="label">Delivery Format</label>
-                      <select value={newFormat} onChange={e => setNewFormat(e.target.value)} className="input">
-                        <option value="email:pass">email:password</option>
-                        <option value="user:pass">user:password</option>
-                        <option value="user:pass:email:pass">user:pass:email:pass</option>
-                        <option value="cookies">cookies</option>
-                        <option value="token">token</option>
-                      </select>
+                      <label className="label">Delivery Format <span style={{ fontSize: 10, color: '#888' }}>(colon-separated)</span></label>
+                      <input
+                        type="text"
+                        value={newFormat}
+                        onChange={e => setNewFormat(e.target.value)}
+                        placeholder="e.g. name:pass:email:emailpass:gender"
+                        className="input"
+                        style={{ fontFamily: 'monospace', fontSize: 13 }}
+                      />
+                      {newFormat && !/^([a-zA-Z0-9_]+)(:[a-zA-Z0-9_]+)*$/.test(newFormat) && (
+                        <p style={{ fontSize: 10, color: '#e53e3e', marginTop: 2 }}>
+                          Use colon-separated names only (e.g. name:pass:email:emailpass:gender)
+                        </p>
+                      )}
+                      {newFormat && /^([a-zA-Z0-9_]+)(:[a-zA-Z0-9_]+)*$/.test(newFormat) && (
+                        <p style={{ fontSize: 10, color: '#3ea136', marginTop: 2 }}>
+                          {newFormat.split(':').length} fields: {newFormat.split(':').join(' → ')}
+                        </p>
+                      )}
                     </div>
                     <div style={{ display: "flex", alignItems: "end", paddingBottom: 2 }}>
                       <label style={{ fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
@@ -349,11 +473,33 @@ export function VendorDashboard() {
                   <form onSubmit={uploadMore}>
                     <div style={{ marginBottom: 12 }}>
                       <label className="label">New Accounts (one per line)</label>
-                      <textarea value={uploadAccounts} onChange={e => setUploadAccounts(e.target.value)} className="input" style={{ fontFamily: "monospace", fontSize: 12 }} rows={8} required placeholder={"user123:pass123\nuser456:pass456"} />
+                      <textarea value={uploadAccounts} onChange={e => { setUploadAccounts(e.target.value); setDupes([]); }} className="input" style={{ fontFamily: "monospace", fontSize: 12 }} rows={8} required placeholder={"user123:pass123\nuser456:pass456"} />
                       <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>
                         <strong>{uploadAccounts.split("\n").filter(l => l.trim()).length}</strong> new accounts
                       </div>
                     </div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                      <button type="button" onClick={checkDuplicates} disabled={checkingDupes || !uploadAccounts.trim()} className="btn btn-secondary" style={{ flex: 1 }}>
+                        {checkingDupes ? "Checking..." : `🔍 Check Duplicates${dupes.length > 0 ? ` (${dupes.length} found)` : ''}`}
+                      </button>
+                      {dupes.length > 0 && (
+                        <button type="button" onClick={removeDuplicateLines} className="btn btn-sm" style={{ background: '#e53e3e', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                          Remove Duplicates
+                        </button>
+                      )}
+                    </div>
+                    {dupes.length > 0 && (
+                      <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 6, padding: 10, marginBottom: 12, fontSize: 11, maxHeight: 150, overflowY: 'auto' }}>
+                        <strong style={{ color: '#856404' }}>⚠️ {dupes.length} duplicate(s) found:</strong>
+                        {dupes.slice(0, 20).map((d, i) => (
+                          <div key={i} style={{ fontFamily: 'monospace', color: '#664d03', padding: '2px 0', borderBottom: '1px solid #ffeeba' }}>
+                            #{d.index + 1}: {d.line.substring(0, 60)}{d.line.length > 60 ? '...' : ''}
+                            {d.productTitle && <span style={{ color: '#856404', fontSize: 10 }}> (in: {d.productTitle})</span>}
+                          </div>
+                        ))}
+                        {dupes.length > 20 && <div style={{ color: '#856404', padding: '2px 0' }}>...and {dupes.length - 20} more</div>}
+                      </div>
+                    )}
                     <button type="submit" className="btn btn-primary" disabled={uploading || !uploadAccounts.trim()}>
                       {uploading ? "Uploading..." : "Upload Accounts (Pending Review)"}
                     </button>
@@ -439,34 +585,87 @@ export function VendorDashboard() {
             {/* PAYOUTS */}
             {tab === "payouts" && (
               <>
-                <div className="panel" style={{ marginBottom: 16 }}>
-                  <div className="panel-head">Withdraw</div>
-                  <form onSubmit={withdraw} style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div style={{ fontSize: 12, color: "#888" }}>Available: <strong style={{ color: "#3ea136" }}>{money(data.user.balance)}</strong></div>
-                    <div><label className="label">Method</label><select value={wdMethod} onChange={e => setWdMethod(e.target.value)} className="input">{METHODS.map(m => <option key={m.key} value={m.key}>{m.label} (min ${m.min}, fee ${m.fee})</option>)}</select></div>
-                    <div><label className="label">Amount ($)</label><input type="number" step="0.01" min={METHODS.find(m => m.key === wdMethod)?.min} value={wdAmount} onChange={e => setWdAmount(e.target.value)} className="input" required />
-                      {wdAmount && <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>Net: {money(Math.max(0, parseFloat(wdAmount) - (METHODS.find(m => m.key === wdMethod)?.fee || 0)))}</div>}
+                {/* Success Screen */}
+                {wdSuccess ? (
+                  <div className="panel" style={{ textAlign: 'center', padding: 32 }}>
+                    <div style={{ width: 60, height: 60, borderRadius: 30, background: '#e8f5e9', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                      <span style={{ fontSize: 28, color: '#3ea136' }}>&#10003;</span>
                     </div>
-                    <div><label className="label">Wallet</label><input type="text" value={wdWallet} onChange={e => setWdWallet(e.target.value)} className="input" required placeholder={METHODS.find(m => m.key === wdMethod)?.ph} /></div>
-                    <button type="submit" className="btn btn-primary">Submit Withdrawal</button>
-                  </form>
-                </div>
-                <div className="panel">
-                  <div className="panel-head">Withdrawal History ({data.withdrawals.length})</div>
-                  {data.withdrawals.length === 0 ? <div style={{ padding: 20, color: "#888", fontSize: 13, textAlign: "center" }}>No withdrawals yet</div> : data.withdrawals.map(w => (
-                    <div key={w.id} className="row">
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13 }}>{w.method}</div>
-                        <div style={{ fontSize: 11, color: "#888" }}>{new Date(w.createdAt).toLocaleDateString()}</div>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{money(w.amount)}</div>
-                        <div style={{ fontSize: 10, color: "#888" }}>Net: {money(w.netAmount)}</div>
-                      </div>
-                      <span className={`badge badge-${w.status}`}>{w.status}</span>
+                    <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8, color: '#3ea136' }}>Withdrawal Request Submitted!</h2>
+                    <p style={{ fontSize: 13, color: '#666', marginBottom: 16 }}>Your withdrawal request has been submitted successfully.</p>
+                    <div style={{ background: '#f9f9f9', borderRadius: 8, padding: 16, textAlign: 'left', maxWidth: 400, margin: '0 auto 16px' }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: '#333' }}>Request Details:</div>
+                      {[{ l: 'Network', v: wdNetworks.find(n => n.id === wdSuccess.method)?.label || wdSuccess.method },
+                        { l: 'Amount', v: `$${wdSuccess.amount.toFixed(2)}` },
+                        { l: 'Fee', v: `$${wdSuccess.fee.toFixed(2)}` },
+                        { l: 'Net Amount', v: `$${wdSuccess.netAmount.toFixed(2)}` },
+                        { l: 'Wallet', v: wdSuccess.wallet },
+                        { l: 'Status', v: 'Pending Approval' },
+                      ].map(d => (
+                        <div key={d.l} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #eee', fontSize: 12 }}>
+                          <span style={{ color: '#888' }}>{d.l}</span>
+                          <span style={{ fontWeight: 600, color: '#333', fontFamily: d.l === 'Wallet' ? 'monospace' : 'inherit', fontSize: d.l === 'Wallet' ? 11 : 12 }}>{d.v}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                    <p style={{ fontSize: 12, color: '#888', marginBottom: 16 }}>Please allow 24-48 hours for processing.</p>
+                    <a
+                      href={sellerSupportLink ? (sellerSupportLink.startsWith('http') ? sellerSupportLink : `https://t.me/${sellerSupportLink.replace('@', '')}`) : 'https://t.me/accspoint_support'}
+                      target='_blank' rel='noopener noreferrer'
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 24px', borderRadius: 6, background: '#0088cc', color: '#fff', fontSize: 13, fontWeight: 600, textDecoration: 'none', marginBottom: 16 }}
+                    >
+                      Contact Support (Seller Only)
+                    </a>
+                    <div><button onClick={() => setWdSuccess(null)} className='btn btn-primary'>New Withdrawal</button></div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="panel" style={{ marginBottom: 16 }}>
+                      <div className="panel-head">Payout / Withdraw Funds</div>
+                      <form onSubmit={withdraw} style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div style={{ fontSize: 13, color: '#555' }}>Available Balance: <strong style={{ color: '#3ea136', fontSize: 16 }}>{money(data.user.balance)}</strong></div>
+                        <div>
+                          <label className="label">Select Network</label>
+                          <select value={wdNetwork} onChange={e => setWdNetwork(e.target.value)} className="input">
+                            {wdNetworks.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
+                          </select>
+                          {wdNetworks.find(n => n.id === wdNetwork) && (
+                            <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Min: ${wdNetworks.find(n => n.id === wdNetwork)!.min} · Fee: ${wdNetworks.find(n => n.id === wdNetwork)!.fee}</div>
+                          )}
+                        </div>
+                        <div>
+                          <label className="label">Amount (USD)</label>
+                          <input type="number" step="0.01" min={wdNetworks.find(n => n.id === wdNetwork)?.min || 10} value={wdAmount} onChange={e => setWdAmount(e.target.value)} className="input" placeholder='0.00' />
+                          {wdAmount && parseFloat(wdAmount) > 0 && wdNetworks.find(n => n.id === wdNetwork) && (
+                            <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Net after fee: {money(Math.max(0, parseFloat(wdAmount) - (wdNetworks.find(n => n.id === wdNetwork)?.fee || 0)))}</div>
+                          )}
+                        </div>
+                        <div>
+                          <label className="label">Wallet Address</label>
+                          <input type="text" value={wdWallet} onChange={e => setWdWallet(e.target.value)} className="input" placeholder={wdNetwork === 'trc20' ? 'T...' : '0x...'} style={{ fontFamily: 'monospace', fontSize: 13 }} />
+                        </div>
+                        {wdError && <div style={{ padding: 10, borderRadius: 6, background: '#fce4ec', color: '#c62828', fontSize: 12 }}>{wdError}</div>}
+                        <button type="submit" disabled={wdLoading} className="btn btn-primary" style={{ padding: '12px 0' }}>{wdLoading ? 'Submitting...' : 'Request Withdrawal'}</button>
+                      </form>
+                    </div>
+                    <div className="panel">
+                      <div className="panel-head">Withdrawal History ({data.withdrawals.length})</div>
+                      {data.withdrawals.length === 0 ? <div style={{ padding: 20, color: '#888', fontSize: 13, textAlign: 'center' }}>No withdrawals yet</div> : data.withdrawals.map(w => (
+                        <div key={w.id} className="row" style={{ padding: '10px 16px', borderBottom: '1px solid #f0f0f0' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{wdNetworks.find(n => n.id === w.method)?.label || w.method}</div>
+                            <div style={{ fontSize: 11, color: '#888' }}>{new Date(w.createdAt).toLocaleDateString()}</div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{money(w.amount)}</div>
+                            <div style={{ fontSize: 10, color: '#888' }}>Net: {money(w.netAmount)}</div>
+                          </div>
+                          <span className={`badge badge-${w.status}`} style={{ marginLeft: 8 }}>{w.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </>
             )}
 

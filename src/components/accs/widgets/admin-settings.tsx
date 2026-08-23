@@ -244,7 +244,8 @@ export function AdminSettings() {
             <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>💬 Support Contact</h3>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
               <div><label style={labelStyle}>Support Email</label><input type="email" style={inputStyle} value={s("support_email")} onChange={e => update("support_email", e.target.value)} /></div>
-              <div><label style={labelStyle}>Telegram / Social</label><input style={inputStyle} value={s("support_telegram")} onChange={e => update("support_telegram", e.target.value)} /></div>
+              <div><label style={labelStyle}>Buyer Support Telegram</label><input style={inputStyle} value={s("support_telegram")} onChange={e => update("support_telegram", e.target.value)} placeholder="@buyer_support" /><div style={hintStyle}>Telegram link for buyer support</div></div>
+              <div><label style={labelStyle}>Seller Support Telegram</label><input style={inputStyle} value={s("seller_support_telegram") || ""} onChange={e => update("seller_support_telegram", e.target.value)} placeholder="@seller_support" /><div style={hintStyle}>Separate Telegram link for seller/supplier support</div></div>
             </div>
           </div>
         )}

@@ -167,6 +167,8 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
   const langRef = useRef<HTMLDivElement>(null);
   // Notification badges
   const [notifCount, setNotifCount] = useState(0);
+  const [notifItems, setNotifItems] = useState<Array<{ label: string; tab: string; icon: string }>>([]);
+  const [showNotifDrop, setShowNotifDrop] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me").then(r => r.json()).then(d => { if (d.user) setUser(d.user); }).catch(() => {});
@@ -191,16 +193,37 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
     if (!user) return;
     if (user.role === "admin") {
       fetch("/api/dashboard/admin").then(r => r.json()).then(d => {
-        setNotifCount((d.stats?.pendingProducts || 0) + (d.stats?.openDisputes || 0) + (d.pendingVendorRequests?.length || 0));
+        const items: Array<{ label: string; tab: string; icon: string }> = [];
+        const pp = d.stats?.pendingProducts || 0;
+        if (pp > 0) items.push({ label: `${pp} product${pp > 1 ? 's' : ''} pending approval`, tab: 'products', icon: '📦' });
+        const od = d.stats?.openDisputes || 0;
+        if (od > 0) items.push({ label: `${od} open dispute${od > 1 ? 's' : ''}`, tab: 'orders', icon: '⚠️' });
+        const vr = d.pendingVendorRequests?.length || 0;
+        if (vr > 0) items.push({ label: `${vr} vendor request${vr > 1 ? 's' : ''} pending`, tab: 'vendors', icon: '🏪' });
+        setNotifItems(items);
+        setNotifCount(items.reduce((sum, i) => sum + parseInt(i.label) || 0, 0));
       }).catch(() => {});
     } else if (user.role === "vendor") {
       fetch("/api/dashboard/vendor").then(r => r.json()).then(d => {
-        setNotifCount((d.stats?.pendingProducts || 0) + (d.stats?.pendingWithdrawals || 0) + (d.stockAlerts?.lowStock?.length || 0));
+        const items: Array<{ label: string; tab: string; icon: string }> = [];
+        const pp = d.stats?.pendingProducts || 0;
+        if (pp > 0) items.push({ label: `${pp} product${pp > 1 ? 's' : ''} pending approval`, tab: 'products', icon: '📦' });
+        const pw = d.stats?.pendingWithdrawals || 0;
+        if (pw > 0) items.push({ label: `${pw} withdrawal${pw > 1 ? 's' : ''} pending`, tab: 'withdrawals', icon: '💸' });
+        const ls = d.stockAlerts?.lowStock?.length || 0;
+        if (ls > 0) items.push({ label: `${ls} product${ls > 1 ? 's' : ''} low stock`, tab: 'products', icon: '📉' });
+        setNotifItems(items);
+        setNotifCount(items.reduce((sum, i) => sum + parseInt(i.label) || 0, 0));
       }).catch(() => {});
     } else {
       fetch("/api/dashboard/buyer").then(r => r.json()).then(d => {
+        const items: Array<{ label: string; tab: string; icon: string }> = [];
+        const od = d.stats?.openDisputes || 0;
+        if (od > 0) items.push({ label: `${od} open dispute${od > 1 ? 's' : ''}`, tab: 'disputes', icon: '⚠️' });
         const unread = (d.notifications || []).filter((n: any) => !n.read).length;
-        setNotifCount((d.stats?.openDisputes || 0) + unread);
+        if (unread > 0) items.push({ label: `${unread} unread notification${unread > 1 ? 's' : ''}`, tab: 'messages', icon: '🔔' });
+        setNotifItems(items);
+        setNotifCount(od + unread);
       }).catch(() => {});
     }
   }, [user]);
@@ -209,6 +232,9 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
     const h = (e: MouseEvent) => {
       if (catRef.current && !catRef.current.contains(e.target as Node)) setShowCat(false);
       if (langRef.current && !langRef.current.contains(e.target as Node)) setLangOpen(false);
+      // Close notif dropdown if click is outside the topbar
+      const topbar = document.querySelector('.topbar');
+      if (topbar && !topbar.contains(e.target as Node)) setShowNotifDrop(false);
     };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
@@ -234,7 +260,22 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
         {!user && <><Link href="/?page=register" className="btn-signup">+ Sign Up</Link>
         <Link href="/?page=login" className="btn-login">Login</Link></>}
         {user && <>
-          <a href={dashUrl(user.role)} style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#3ea136", borderRadius: 3, textDecoration: "none", fontWeight: 600, position: "relative", display: "inline-flex", alignItems: "center" }}>Dashboard{notifCount > 0 && <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>{notifCount}</span>}</a>
+          <div style={{ position: "relative", display: "inline-flex" }}>
+            <a href={dashUrl(user.role)} onClick={e => { if (notifCount > 0) { e.preventDefault(); setShowNotifDrop(!showNotifDrop); } }} style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#3ea136", borderRadius: 3, textDecoration: "none", fontWeight: 600, display: "inline-flex", alignItems: "center", cursor: notifCount > 0 ? "pointer" : "default" }}>Dashboard{notifCount > 0 && <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>{notifCount}</span>}</a>
+            {showNotifDrop && notifItems.length > 0 && (
+              <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: "#fff", border: "1px solid #ddd", borderRadius: 6, padding: 6, minWidth: 260, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#333", padding: "4px 8px 6px", borderBottom: "1px solid #eee" }}>Notifications</div>
+                {notifItems.map((item, i) => (
+                  <a key={i} href={`${dashUrl(user!.role)}&tab=${item.tab}`} onClick={() => setShowNotifDrop(false)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 4, textDecoration: "none", color: "#333", fontSize: 12, transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "#f5f5f5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                    <span>{item.icon}</span>
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                    <span style={{ fontSize: 10, color: "#999" }}>&rsaquo;</span>
+                  </a>
+                ))}
+                <a href={dashUrl(user!.role)} onClick={() => setShowNotifDrop(false)} style={{ display: "block", textAlign: "center", padding: "6px 8px", marginTop: 4, borderTop: "1px solid #eee", fontSize: 11, color: "#3ea136", fontWeight: 600, textDecoration: "none" }}>View all in Dashboard</a>
+              </div>
+            )}
+          </div>
           <Link href="/?page=deposit" style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#5fa830", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 600, textDecoration: "none" }}>Deposit</Link>
           <span style={{ color: "#5fa830", fontSize: 12, fontWeight: 700 }}>{money(user.balance)}</span>
           <button onClick={logout} style={{ color: "#aaa", fontSize: 11, background: "none", border: "none", cursor: "pointer" }}>Logout</button>
@@ -262,7 +303,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
         <Link href="/?page=faq">FAQ</Link>
         <Link href="/?page=rules">Terms of use</Link>
         {!user && <Link href="/?page=seller-register" className="nav-seller">Become a seller</Link>}
-        {user && <a href={dashUrl(user.role)} style={{ color: "#5fa830", fontWeight: 600, marginLeft: 8, position: "relative", display: "inline-flex", alignItems: "center" }}>Dashboard{notifCount > 0 && <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>{notifCount}</span>}</a>}
+        {user && <a href={dashUrl(user.role)} onClick={e => { if (notifCount > 0) { e.preventDefault(); setShowNotifDrop(!showNotifDrop); } }} style={{ color: "#5fa830", fontWeight: 600, marginLeft: 8, position: "relative", display: "inline-flex", alignItems: "center", cursor: notifCount > 0 ? "pointer" : "default" }}>Dashboard{notifCount > 0 && <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>{notifCount}</span>}</a>}
       </div>
 
       {/* HEADER: Logo + Category + Search */}

@@ -317,13 +317,43 @@ export async function POST(req: Request) {
       if (!depositId) return NextResponse.json({ error: "depositId required" }, { status: 400 });
       const deposit = await prisma.deposit.findUnique({ where: { id: depositId }, select: { userId: true, status: true, amount: true, exactAmount: true, txHash: true, completedAt: true } });
       if (!deposit) return NextResponse.json({ error: "Deposit not found" }, { status: 404 });
-      // Ownership check — only the deposit owner can check status
       if (deposit.userId !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       return NextResponse.json({ status: deposit.status, amount: deposit.amount, exactAmount: deposit.exactAmount, txHash: deposit.txHash, completedAt: deposit.completedAt });
     }
 
+    // Admin: approve a pending deposit
+    if (action === "admin_approve") {
+      const admin = await prisma.user.findUnique({ where: { id: userId } });
+      if (!admin || admin.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const { depositId } = body;
+      if (!depositId) return NextResponse.json({ error: "depositId required" }, { status: 400 });
+      const deposit = await prisma.deposit.findUnique({ where: { id: depositId } });
+      if (!deposit) return NextResponse.json({ error: "Deposit not found" }, { status: 404 });
+      if (deposit.status !== "pending") return NextResponse.json({ error: "Only pending deposits can be approved" }, { status: 400 });
+      // Credit user balance and mark completed
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: deposit.userId }, data: { balance: { increment: deposit.amount } } }),
+        prisma.deposit.update({ where: { id: depositId }, data: { status: "completed", completedAt: new Date() } }),
+        prisma.activityLog.create({ data: { action: "deposit_completed", description: `Admin approved ${deposit.amount} USDT deposit for user ${deposit.userId}`, userId } }),
+      ]);
+      return NextResponse.json({ success: true, message: `Approved ${deposit.amount} USDT deposit` });
+    }
+
+    // Admin: reject/delete a pending deposit
+    if (action === "admin_reject") {
+      const admin = await prisma.user.findUnique({ where: { id: userId } });
+      if (!admin || admin.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const { depositId } = body;
+      if (!depositId) return NextResponse.json({ error: "depositId required" }, { status: 400 });
+      const deposit = await prisma.deposit.findUnique({ where: { id: depositId } });
+      if (!deposit) return NextResponse.json({ error: "Deposit not found" }, { status: 404 });
+      await prisma.deposit.update({ where: { id: depositId }, data: { status: "rejected" } });
+      await prisma.activityLog.create({ data: { action: "deposit_rejected", description: `Admin rejected ${deposit.amount} USDT deposit for user ${deposit.userId}`, userId } });
+      return NextResponse.json({ success: true, message: `Rejected deposit` });
+    }
+
     return NextResponse.json(
-      { error: "Unknown action. Use create_deposit, verify_deposit, or check_status." },
+      { error: "Unknown action." },
       { status: 400 }
     );
   } catch (err: any) {

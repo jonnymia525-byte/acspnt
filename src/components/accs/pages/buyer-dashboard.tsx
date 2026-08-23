@@ -25,7 +25,13 @@ const TABS = [
 
 export function BuyerDashboard() {
   const { setUser } = useStore();
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('tab') || 'overview';
+    }
+    return 'overview';
+  });
   const [data, setData] = useState<Data | null>(null);
 
   const [reportId, setReportId] = useState<string | null>(null);

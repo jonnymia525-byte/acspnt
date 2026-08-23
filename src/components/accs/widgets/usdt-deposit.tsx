@@ -21,12 +21,6 @@ interface DepositResult {
   minConfirmations: number;
 }
 
-const EXPLORER_URLS: Record<string, string> = {
-  trc20: "https://tronscan.org/#/transaction/",
-  bep20: "https://bscscan.com/tx/",
-  erc20: "https://etherscan.io/tx/",
-};
-
 export function USDTDeposit() {
   const { user } = useStore();
   const [step, setStep] = useState<"select" | "payment" | "verify" | "done">("select");
@@ -92,7 +86,6 @@ export function USDTDeposit() {
       if (data.success) {
         setVerifyMsg(data.message);
         if (data.newBalance !== undefined) {
-          // Update user balance in store
           const { useStore } = await import("@/store");
           const store = useStore.getState();
           if (store.user) store.setUser({ ...store.user, balance: data.newBalance });
@@ -189,6 +182,15 @@ export function USDTDeposit() {
                 {loading ? "Creating..." : "Continue"}
               </button>
             )}
+
+            {/* Contact Support */}
+            <a
+              href="/?page=support"
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", padding: "10px 0", borderRadius: 6, border: "1px solid #1976d2", background: "#e3f2fd", color: "#1976d2", fontSize: 13, fontWeight: 600, textDecoration: "none", cursor: "pointer" }}
+            >
+              <svg viewBox="0 0 24 24" style={{ width: 16, height: 16, fill: "#1976d2" }}><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+              Contact Support — Need help with payment?
+            </a>
           </div>
         )}
 
@@ -221,7 +223,7 @@ export function USDTDeposit() {
                   alt="QR Code"
                   style={{ width: 180, height: 180, borderRadius: 6, border: "1px solid #eee", display: "block" }}
                 />
-                {/* USDT logo overlay in center — purely visual, does not affect QR scanning */}
+                {/* USDT logo overlay */}
                 <div style={{
                   position: "absolute", top: "50%", left: "50%",
                   transform: "translate(-50%, -50%)",
@@ -254,13 +256,22 @@ export function USDTDeposit() {
               </div>
             </div>
 
-            {/* Confirm button → goes to txHash step */}
+            {/* Confirm button */}
             <button
               onClick={() => setStep("verify")}
               style={{ padding: "12px 0", borderRadius: 6, border: "none", background: "#3ea136", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
             >
               I sent the payment
             </button>
+
+            {/* Contact Support */}
+            <a
+              href="/?page=support"
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", padding: "10px 0", borderRadius: 6, border: "1px solid #1976d2", background: "#e3f2fd", color: "#1976d2", fontSize: 13, fontWeight: 600, textDecoration: "none", cursor: "pointer" }}
+            >
+              <svg viewBox="0 0 24 24" style={{ width: 16, height: 16, fill: "#1976d2" }}><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+              Contact Support — Need help with payment?
+            </a>
           </div>
         )}
 
@@ -304,13 +315,14 @@ export function USDTDeposit() {
               </button>
             </div>
 
-            <button
-              onClick={() => window.location.href = '/?page=support'}
-              style={{ width: '100%', padding: '10px 0', borderRadius: 6, border: '1px solid #1976d2', background: '#e3f2fd', color: '#1976d2', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            {/* Contact Support */}
+            <a
+              href="/?page=support"
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", padding: "10px 0", borderRadius: 6, border: "1px solid #1976d2", background: "#e3f2fd", color: "#1976d2", fontSize: 13, fontWeight: 600, textDecoration: "none", cursor: "pointer" }}
             >
-              <svg viewBox="0 0 24 24" style={{ width: 16, height: 16, fill: '#1976d2' }}><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+              <svg viewBox="0 0 24 24" style={{ width: 16, height: 16, fill: "#1976d2" }}><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
               Contact Support — Need help with payment?
-            </button>
+            </a>
           </div>
         )}
 

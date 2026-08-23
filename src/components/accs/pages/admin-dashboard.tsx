@@ -33,7 +33,7 @@ interface Order {
 
 interface Withdrawal {
   id: string; amount: number; netAmount: number; fee: number; method: string;
-  status: string; createdAt: string; user: { username: string };
+  wallet?: string; status: string; rejectReason?: string; createdAt: string; user: { id: string; username: string; email?: string };
 }
 
 interface VendorRequest {
@@ -165,7 +165,13 @@ function BestSellerManager({ loadAll }: { loadAll: () => void }) {
 }
 
 export function AdminDashboard() {
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('tab') || 'overview';
+    }
+    return 'overview';
+  });
   const [users, setUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -1405,20 +1411,36 @@ export function AdminDashboard() {
             {/* ==================== WITHDRAWALS ==================== */}
             {tab === "withdrawals" && (
               <div className="panel">
-                <div className="panel-head">Withdrawals ({withdrawals.length})</div>
-                {withdrawals.length === 0 ? <div style={{ padding: 20, color: "#888", fontSize: 13, textAlign: "center" }}>No withdrawals</div> :
+                <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>💸 Withdrawals ({withdrawals.length})</span>
+                  <button className="btn btn-sm btn-secondary" onClick={() => { fetch('/api/dashboard/admin').then(r => r.json()).then(d => { setWithdrawals(d.allWithdrawals || []); }); }}>Refresh</button>
+                </div>
+                {withdrawals.length === 0 ? <div style={{ padding: 20, color: '#888', fontSize: 13, textAlign: 'center' }}>No withdrawals</div> :
                   withdrawals.map(w => (
-                    <div key={w.id} className="row">
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600 }}>{w.user.username}</div>
-                        <div style={{ fontSize: 11, color: "#888" }}>{w.method} · Fee: {money(w.fee)}</div>
+                    <div key={w.id} style={{ borderBottom: '1px solid #eee', padding: 12 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 80px', gap: 10, alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{w.user?.username || 'Vendor'}</div>
+                          <div style={{ fontSize: 11, color: '#888' }}>{w.user?.email || ''}</div>
+                        </div>
+                        <div style={{ fontSize: 12, color: '#666' }}>{w.method?.toUpperCase()}</div>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 14 }}>{money(w.amount)}</div>
+                          <div style={{ fontSize: 10, color: '#888' }}>Net: {money(w.netAmount)} · Fee: {money(w.fee)}</div>
+                        </div>
+                        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: w.status === 'approved' ? '#e8f5e9' : w.status === 'pending' ? '#fff3cd' : '#fce4ec', color: w.status === 'approved' ? '#2e7d32' : w.status === 'pending' ? '#856404' : '#c62828' }}>{w.status}</span>
                       </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontWeight: 600 }}>{money(w.amount)}</div>
-                        <div style={{ fontSize: 10, color: "#888" }}>Net: {money(w.netAmount)}</div>
-                      </div>
-                      <span className={`badge badge-${w.status}`} style={{ marginLeft: 8 }}>{w.status}</span>
-                      <span style={{ fontSize: 10, color: "#aaa", marginLeft: 8 }}>{new Date(w.createdAt).toLocaleDateString()}</span>
+                      {w.wallet && (
+                        <div style={{ marginTop: 6, padding: '4px 8px', background: '#f0f7ff', borderRadius: 4, fontFamily: 'monospace', fontSize: 11, color: '#555', wordBreak: 'break-all' }}>
+                          Wallet: {w.wallet}
+                        </div>
+                      )}
+                      {w.status === 'pending' && (
+                        <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+                          <button style={{ padding: '4px 12px', borderRadius: 4, border: 'none', background: '#28a745', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={async () => { if (!confirm('Approve this withdrawal?')) return; const res = await fetch('/api/withdrawals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_approve', withdrawalId: w.id }) }); if (res.ok) { setWithdrawals(prev => prev.map(x => x.id === w.id ? { ...x, status: 'approved' } : x)); } }}>Approve</button>
+                          <button style={{ padding: '4px 12px', borderRadius: 4, border: 'none', background: '#dc3545', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={async () => { if (!confirm('Reject this withdrawal?')) return; const res = await fetch('/api/withdrawals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_reject', withdrawalId: w.id }) }); if (res.ok) { setWithdrawals(prev => prev.map(x => x.id === w.id ? { ...x, status: 'rejected' } : x)); } }}>Reject</button>
+                        </div>
+                      )}
                     </div>
                   ))
                 }
@@ -1477,7 +1499,7 @@ export function AdminDashboard() {
                           <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: d.status === 'completed' ? '#e8f5e9' : d.status === 'pending' ? '#fff3cd' : '#fde8e8', color: d.status === 'completed' ? '#2e7d32' : d.status === 'pending' ? '#856404' : '#c62828' }}>{d.status}</span>
                           <span style={{ fontSize: 10, color: '#aaa', textAlign: 'right' }}>{new Date(d.createdAt).toLocaleDateString()}</span>
                         </div>
-                        <div style={{ marginTop: 6, display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11 }}>
+                        <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 11 }}>
                           {d.txHash && (
                             <div style={{ padding: '4px 8px', background: '#f5f5f5', borderRadius: 4, fontFamily: 'monospace', color: '#555', wordBreak: 'break-all', flex: '1 1 300px' }}>
                               TX: {d.txHash}
@@ -1486,6 +1508,12 @@ export function AdminDashboard() {
                           {d.walletAddress && (
                             <div style={{ padding: '4px 8px', background: '#f0f7ff', borderRadius: 4, fontFamily: 'monospace', color: '#555', wordBreak: 'break-all', flex: '1 1 300px' }}>
                               Wallet: {d.walletAddress}
+                            </div>
+                          )}
+                          {d.status === 'pending' && (
+                            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                              <button style={{ padding: '4px 10px', borderRadius: 4, border: 'none', background: '#28a745', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={async () => { if (!confirm('Approve this deposit?')) return; const res = await fetch('/api/deposits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_approve', depositId: d.id }) }); if (res.ok) fetchDeposits(); }}>Approve</button>
+                              <button style={{ padding: '4px 10px', borderRadius: 4, border: 'none', background: '#dc3545', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={async () => { if (!confirm('Reject this deposit?')) return; const res = await fetch('/api/deposits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_reject', depositId: d.id }) }); if (res.ok) fetchDeposits(); }}>Reject</button>
                             </div>
                           )}
                         </div>

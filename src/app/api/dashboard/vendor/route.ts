@@ -76,6 +76,20 @@ export async function GET() {
   const totalUnits = salesData.reduce((sum, p) => sum + p.quantity, 0);
   const avgRating = reviewAgg._avg.rating ? Math.round(reviewAgg._avg.rating * 10) / 10 : 0;
 
+  // Account inventory stats: total accounts across all products
+  const allProducts = await prisma.product.findMany({
+    where: { vendorId: userId },
+    select: { stock: true, status: true },
+  });
+  const totalAccountsInStock = allProducts.reduce((sum, p) => sum + p.stock, 0);
+  const accountsSold = totalUnits; // each unit = 1 account sold
+  const pendingApprovalAccounts = allProducts
+    .filter(p => p.status === "pending")
+    .reduce((sum, p) => sum + p.stock, 0);
+  const liveAccounts = allProducts
+    .filter(p => p.status === "approved")
+    .reduce((sum, p) => sum + p.stock, 0);
+
   return NextResponse.json({
     user,
     stats: {
@@ -88,6 +102,11 @@ export async function GET() {
       pendingProducts: productStatusCountsMap.get("pending") ?? 0,
       pendingWithdrawals: withdrawalStatusCountsMap.get("pending") ?? 0,
       lowStockCount: lowStock.length,
+      // Account inventory stats
+      totalAccountsInStock,
+      accountsSold,
+      pendingApprovalAccounts,
+      liveAccounts,
     },
     stockAlerts: { lowStock, outOfStock },
     products,

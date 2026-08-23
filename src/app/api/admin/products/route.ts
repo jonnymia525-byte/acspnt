@@ -82,7 +82,7 @@ export async function POST(req: Request) {
     case "approve": {
       await prisma.product.update({ where: { id: productId }, data: { status: "approved", visible: true } });
       await prisma.activityLog.create({ data: { action: "product_approved", description: `Admin approved "${product.title}"`, userId: admin.id } });
-      await prisma.notification.create({ data: { userId: product.vendorId, title: "Product Approved", message: `Your product "${product.title}" has been approved and is now live.` } });
+      await prisma.notification.create({ data: { userId: product.vendorId, title: "Product Approved", message: `Your product "${product.title}" has been approved and is now live.`, section: 'products' } });
       return NextResponse.json({ success: true });
     }
 
@@ -90,13 +90,13 @@ export async function POST(req: Request) {
       if (!data.reason) return NextResponse.json({ error: "reason required" }, { status: 400 });
       await prisma.product.update({ where: { id: productId }, data: { status: "rejected", visible: false } });
       await prisma.activityLog.create({ data: { action: "product_rejected", description: `Admin rejected "${product.title}": ${data.reason}`, userId: admin.id } });
-      await prisma.notification.create({ data: { userId: product.vendorId, title: "Product Rejected", message: `Your product "${product.title}" was rejected. Reason: ${data.reason}` } });
+      await prisma.notification.create({ data: { userId: product.vendorId, title: "Product Rejected", message: `Your product "${product.title}" was rejected. Reason: ${data.reason}`, section: 'products' } });
       return NextResponse.json({ success: true });
     }
 
     case "delete": {
       // Soft delete
-      await prisma.notification.create({ data: { userId: product.vendorId, title: "Product Removed", message: `Your product "${product.title}" has been removed by admin.` } });
+      await prisma.notification.create({ data: { userId: product.vendorId, title: "Product Removed", message: `Your product "${product.title}" has been removed by admin.`, section: 'products' } });
       await prisma.activityLog.create({ data: { action: "product_deleted", description: `Admin deleted "${product.title}"`, userId: admin.id } });
       await prisma.product.update({ where: { id: productId }, data: { deletedAt: new Date(), visible: false, status: "deleted" } });
       return NextResponse.json({ success: true });

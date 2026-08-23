@@ -62,33 +62,70 @@ export function ChatSupport() {
     if (isOpen && user) fetchSessions();
   }, [isOpen, user]);
 
-  // Poll for unread count even when widget is closed
+  // Smart polling: 10s when tab active, pause when hidden, re-fetch on focus
   useEffect(() => {
     if (!user) return;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    const ACTIVE_MS = 10000;
+
     const checkUnread = () => {
       fetch("/api/chat").then(r => r.json()).then(d => {
         const sessions = d.sessions || [];
         let unread = 0;
         for (const s of sessions) {
-          // Use server-computed unreadCount from groupBy query
           unread += s.unreadCount || 0;
         }
         setUnreadCount(unread);
-        // Also update sessions list so badge in list view is fresh
         setSessions(sessions);
       }).catch(() => {});
     };
+
+    const startPolling = () => {
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(checkUnread, ACTIVE_MS);
+    };
+
+    const stopPolling = () => {
+      if (intervalId) { clearInterval(intervalId); intervalId = null; }
+    };
+
+    // Initial fetch
     checkUnread();
-    const interval = setInterval(checkUnread, 15000);
-    return () => clearInterval(interval);
+    startPolling();
+
+    // Pause when tab hidden, resume when visible
+    const onVisibility = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        checkUnread(); // immediate re-fetch on focus
+        startPolling();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [user]);
 
   useEffect(() => {
-    if (activeSession) {
-      fetchMessages(activeSession.id);
-      const interval = setInterval(() => fetchMessages(activeSession.id), 5000);
-      return () => clearInterval(interval);
-    }
+    if (!activeSession) return;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    const MSG_POLL_MS = 5000;
+
+    fetchMessages(activeSession.id);
+    const start = () => { intervalId = setInterval(() => fetchMessages(activeSession.id), MSG_POLL_MS); };
+    const stop = () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } };
+    start();
+
+    const onVis = () => {
+      if (document.hidden) stop();
+      else { fetchMessages(activeSession.id); start(); }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
   }, [activeSession?.id]);
 
   const openSession = (session: ChatSession) => {

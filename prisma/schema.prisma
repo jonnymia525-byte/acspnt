@@ -348,6 +348,7 @@ model Notification {
   message   String
   read      Boolean  @default(false)
   type      String   @default("info")
+  section   String   @default("general")
   link      String?
   createdAt DateTime @default(now())
 
@@ -355,6 +356,8 @@ model Notification {
   user      User     @relation(fields: [userId], references: [id])
 
   @@index([userId])
+  @@index([userId, read])
+  @@index([userId, section])
 }
 
 model ActivityLog {

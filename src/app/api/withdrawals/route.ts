@@ -117,16 +117,14 @@ export async function POST(req: Request) {
     const fee = net.fee;
     const netAmount = round2(amount - fee);
 
-    await prisma.user.update({ where: { id: user.id }, data: { balance: { decrement: amount } } });
-    const withdrawal = await prisma.withdrawal.create({
-      data: { amount, netAmount, fee, method: network, wallet, status: "pending", userId: user.id },
-    });
-    await prisma.transaction.create({
-      data: { type: "withdrawal", amount: -amount, description: `Withdrawal via ${net.label}`, userId: user.id },
-    });
-    await prisma.activityLog.create({
-      data: { action: "withdrawal_requested", description: `${user.username} requested $${amount} USDT withdrawal via ${net.label}`, userId: user.id },
-    });
+    // Atomic: decrement balance + create withdrawal + log all at once
+    const result = await prisma.$transaction([
+      prisma.user.update({ where: { id: user.id }, data: { balance: { decrement: amount } } }),
+      prisma.withdrawal.create({ data: { amount, netAmount, fee, method: network, wallet, status: "pending", userId: user.id } }),
+      prisma.transaction.create({ data: { type: "withdrawal", amount: -amount, description: `Withdrawal via ${net.label}`, userId: user.id } }),
+      prisma.activityLog.create({ data: { action: "withdrawal_requested", description: `${user.username} requested $${amount} USDT withdrawal via ${net.label}`, userId: user.id } }),
+    ]);
+    const withdrawal = result[1];
 
     return NextResponse.json({
       success: true,

@@ -267,28 +267,13 @@ export async function POST(req: Request) {
         );
       }
 
-      // ─── VERIFIED — credit user balance ───────────────────────────
+      // ─── VERIFIED — credit user balance ATOMICALLY ─────────────────
       const creditedAmount = deposit.exactAmount || deposit.amount;
-      await prisma.user.update({
-        where: { id: userId },
-        data: { balance: { increment: creditedAmount } },
-      });
-      await prisma.deposit.update({
-        where: { id: depositId },
-        data: {
-          txHash: trimmedTxHash,
-          status: "completed",
-          completedAt: new Date(),
-        },
-      });
-
-      await prisma.activityLog.create({
-        data: {
-          action: "deposit_verified",
-          description: `Deposit of $${creditedAmount.toFixed(2)} USDT verified and credited via ${deposit.network?.toUpperCase()}`,
-          userId,
-        },
-      });
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: userId }, data: { balance: { increment: creditedAmount } } }),
+        prisma.deposit.update({ where: { id: depositId }, data: { txHash: trimmedTxHash, status: "completed", completedAt: new Date() } }),
+        prisma.activityLog.create({ data: { action: "deposit_verified", description: `Deposit of $${creditedAmount.toFixed(2)} USDT verified and credited via ${deposit.network?.toUpperCase()}`, userId } }),
+      ]);
 
       // Notify user
       await prisma.notification

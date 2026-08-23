@@ -109,7 +109,7 @@ export async function POST(req: Request) {
         data: { type: "commission", amount: commissionAmount, description: `Platform commission: ${product.title}`, userId: product.vendorId },
       }),
       prisma.notification.create({
-        data: { title: "Purchase complete", message: `Order for ${product.title} delivered. ${money(total)} deducted.`, type: "success", userId: user.id },
+        data: { title: "Purchase complete", message: `Order for ${product.title} delivered. ${money(total)} deducted.`, type: "success", section: 'orders', userId: user.id },
       }),
       prisma.activityLog.create({
         data: { action: "purchase", description: `${user.username} bought ${quantity}× ${product.title} for ${money(total)}`, userId: user.id },
@@ -126,13 +126,13 @@ export async function POST(req: Request) {
     if (newStock > 0 && newStock <= 5) {
       ops.push(
         prisma.notification.create({
-          data: { title: "Low stock alert", message: `${product.title} has only ${newStock} left`, type: "warning", userId: product.vendorId },
+          data: { title: "Low stock alert", message: `${product.title} has only ${newStock} left`, type: "warning", section: 'products', userId: product.vendorId },
         }),
       );
     } else if (newStock <= 0) {
       ops.push(
         prisma.notification.create({
-          data: { title: "Out of stock", message: `${product.title} is now sold out`, type: "error", userId: product.vendorId },
+          data: { title: "Out of stock", message: `${product.title} is now sold out`, type: "error", section: 'products', userId: product.vendorId },
         }),
       );
     }

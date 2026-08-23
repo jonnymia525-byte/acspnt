@@ -165,10 +165,114 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
   const [socialLinks, setSocialLinks] = useState<Record<string, string>>({});
   const catRef = useRef<HTMLDivElement>(null);
   const langRef = useRef<HTMLDivElement>(null);
-  // Notification badges
-  const [notifCount, setNotifCount] = useState(0);
-  const [notifItems, setNotifItems] = useState<Array<{ label: string; tab: string; icon: string }>>([]);
+  // Notification system
+  const [notifTotal, setNotifTotal] = useState(0);
+  const [notifSections, setNotifSections] = useState<Array<{ section: string; count: number }>>([]);
+  const [notifGrouped, setNotifGrouped] = useState<Record<string, Array<{ id: string; title: string; message: string; type: string; section: string; link: string | null; createdAt: string }>>>({});
   const [showNotifDrop, setShowNotifDrop] = useState(false);
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+  const [loadingNotifs, setLoadingNotifs] = useState(false);
+
+  const SECTION_META: Record<string, { icon: string; label: string; tab: string }> = {
+    orders: { icon: '📦', label: 'Orders', tab: 'orders' },
+    payouts: { icon: '💸', label: 'Payouts', tab: 'withdrawals' },
+    reviews: { icon: '⭐', label: 'Reviews', tab: 'reviews' },
+    deposits: { icon: '💰', label: 'Deposits', tab: 'deposits' },
+    products: { icon: '🏷️', label: 'Products', tab: 'products' },
+    vendors: { icon: '🏪', label: 'Vendors', tab: 'vendors' },
+    disputes: { icon: '⚠️', label: 'Disputes', tab: 'disputes' },
+    messages: { icon: '💬', label: 'Messages', tab: 'messages' },
+    account: { icon: '👤', label: 'Account', tab: 'overview' },
+    general: { icon: '🔔', label: 'Notifications', tab: 'overview' },
+  };
+
+  const fetchNotifications = async () => {
+    if (!user) return;
+    setLoadingNotifs(true);
+    try {
+      // Fetch DB notifications
+      const notifRes = await fetch('/api/notifications');
+      const notifData = await notifRes.json();
+      const dbSections: Array<{ section: string; count: number }> = notifData.sections || [];
+      const dbGrouped: Record<string, any[]> = notifData.grouped || {};
+
+      // Also fetch role-specific dashboard stats
+      const dashSections: Array<{ section: string; count: number }> = [];
+      const dashGrouped: Record<string, any[]> = {};
+
+      if (user.role === 'admin') {
+        const d = await fetch('/api/dashboard/admin').then(r => r.json()).catch(() => ({}));
+        const pp = d.stats?.pendingProducts || 0;
+        if (pp > 0) { dashSections.push({ section: 'products', count: pp }); dashGrouped['products'] = [{ id: 'dash-products', title: `${pp} product${pp > 1 ? 's' : ''} pending approval`, message: 'Waiting for admin review', type: 'pending', section: 'products', link: null, createdAt: new Date().toISOString() }]; }
+        const od = d.stats?.openDisputes || 0;
+        if (od > 0) { dashSections.push({ section: 'orders', count: od }); dashGrouped['orders'] = [{ id: 'dash-disputes', title: `${od} open dispute${od > 1 ? 's' : ''}`, message: 'Requires attention', type: 'warning', section: 'orders', link: null, createdAt: new Date().toISOString() }]; }
+        const vr = d.pendingVendorRequests?.length || 0;
+        if (vr > 0) { dashSections.push({ section: 'vendors', count: vr }); dashGrouped['vendors'] = [{ id: 'dash-vendors', title: `${vr} vendor request${vr > 1 ? 's' : ''} pending`, message: 'Awaiting approval', type: 'pending', section: 'vendors', link: null, createdAt: new Date().toISOString() }]; }
+      } else if (user.role === 'vendor') {
+        const d = await fetch('/api/dashboard/vendor').then(r => r.json()).catch(() => ({}));
+        const pp = d.stats?.pendingProducts || 0;
+        if (pp > 0) { dashSections.push({ section: 'products', count: pp }); dashGrouped['products'] = [{ id: 'dash-products', title: `${pp} product${pp > 1 ? 's' : ''} pending approval`, message: 'Waiting for admin review', type: 'pending', section: 'products', link: null, createdAt: new Date().toISOString() }]; }
+        const pw = d.stats?.pendingWithdrawals || 0;
+        if (pw > 0) { dashSections.push({ section: 'payouts', count: pw }); dashGrouped['payouts'] = [{ id: 'dash-payouts', title: `${pw} withdrawal${pw > 1 ? 's' : ''} pending`, message: 'Processing', type: 'pending', section: 'payouts', link: null, createdAt: new Date().toISOString() }]; }
+        const ls = d.stockAlerts?.lowStock?.length || 0;
+        if (ls > 0) { dashSections.push({ section: 'products', count: ls }); if (!dashGrouped['products']) dashGrouped['products'] = []; dashGrouped['products'].push({ id: 'dash-stock', title: `${ls} product${ls > 1 ? 's' : ''} low stock`, message: 'Restock needed', type: 'warning', section: 'products', link: null, createdAt: new Date().toISOString() }); }
+      } else {
+        const d = await fetch('/api/dashboard/buyer').then(r => r.json()).catch(() => ({}));
+        const od = d.stats?.openDisputes || 0;
+        if (od > 0) { dashSections.push({ section: 'disputes', count: od }); dashGrouped['disputes'] = [{ id: 'dash-disputes', title: `${od} open dispute${od > 1 ? 's' : ''}`, message: 'Requires attention', type: 'warning', section: 'disputes', link: null, createdAt: new Date().toISOString() }]; }
+      }
+
+      // Merge DB and dashboard sections
+      const allSections = new Map<string, number>();
+      for (const s of dbSections) allSections.set(s.section, (allSections.get(s.section) || 0) + s.count);
+      for (const s of dashSections) allSections.set(s.section, (allSections.get(s.section) || 0) + s.count);
+      const mergedSections = Array.from(allSections.entries()).map(([section, count]) => ({ section, count })).sort((a, b) => b.count - a.count);
+
+      // Merge grouped items
+      const mergedGrouped: Record<string, any[]> = { ...dbGrouped };
+      for (const [s, items] of Object.entries(dashGrouped)) {
+        if (!mergedGrouped[s]) mergedGrouped[s] = [];
+        mergedGrouped[s] = [...items, ...mergedGrouped[s]];
+      }
+
+      setNotifSections(mergedSections);
+      setNotifGrouped(mergedGrouped);
+      setNotifTotal(mergedSections.reduce((sum, s) => sum + s.count, 0));
+    } catch {}
+    setLoadingNotifs(false);
+  };
+
+  useEffect(() => { if (user) fetchNotifications(); }, [user]);
+  useEffect(() => { if (showNotifDrop && user) fetchNotifications(); }, [showNotifDrop]);
+  // Smart notification polling: 30s when active, pause when hidden, re-fetch on focus
+  useEffect(() => {
+    if (!user) return;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    const POLL_MS = 30000;
+
+    const startPolling = () => {
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(() => fetchNotifications(), POLL_MS);
+    };
+    const stopPolling = () => {
+      if (intervalId) { clearInterval(intervalId); intervalId = null; }
+    };
+
+    startPolling();
+    const onVisibility = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        fetchNotifications();
+        startPolling();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stopPolling();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [user]);
 
   useEffect(() => {
     fetch("/api/auth/me").then(r => r.json()).then(d => { if (d.user) setUser(d.user); }).catch(() => {});
@@ -188,45 +292,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
     }).catch(() => {});
   }, [setUser]);
 
-  // Fetch notification count after user is loaded
-  useEffect(() => {
-    if (!user) return;
-    if (user.role === "admin") {
-      fetch("/api/dashboard/admin").then(r => r.json()).then(d => {
-        const items: Array<{ label: string; tab: string; icon: string }> = [];
-        const pp = d.stats?.pendingProducts || 0;
-        if (pp > 0) items.push({ label: `${pp} product${pp > 1 ? 's' : ''} pending approval`, tab: 'products', icon: '📦' });
-        const od = d.stats?.openDisputes || 0;
-        if (od > 0) items.push({ label: `${od} open dispute${od > 1 ? 's' : ''}`, tab: 'orders', icon: '⚠️' });
-        const vr = d.pendingVendorRequests?.length || 0;
-        if (vr > 0) items.push({ label: `${vr} vendor request${vr > 1 ? 's' : ''} pending`, tab: 'vendors', icon: '🏪' });
-        setNotifItems(items);
-        setNotifCount(items.reduce((sum, i) => sum + parseInt(i.label) || 0, 0));
-      }).catch(() => {});
-    } else if (user.role === "vendor") {
-      fetch("/api/dashboard/vendor").then(r => r.json()).then(d => {
-        const items: Array<{ label: string; tab: string; icon: string }> = [];
-        const pp = d.stats?.pendingProducts || 0;
-        if (pp > 0) items.push({ label: `${pp} product${pp > 1 ? 's' : ''} pending approval`, tab: 'products', icon: '📦' });
-        const pw = d.stats?.pendingWithdrawals || 0;
-        if (pw > 0) items.push({ label: `${pw} withdrawal${pw > 1 ? 's' : ''} pending`, tab: 'withdrawals', icon: '💸' });
-        const ls = d.stockAlerts?.lowStock?.length || 0;
-        if (ls > 0) items.push({ label: `${ls} product${ls > 1 ? 's' : ''} low stock`, tab: 'products', icon: '📉' });
-        setNotifItems(items);
-        setNotifCount(items.reduce((sum, i) => sum + parseInt(i.label) || 0, 0));
-      }).catch(() => {});
-    } else {
-      fetch("/api/dashboard/buyer").then(r => r.json()).then(d => {
-        const items: Array<{ label: string; tab: string; icon: string }> = [];
-        const od = d.stats?.openDisputes || 0;
-        if (od > 0) items.push({ label: `${od} open dispute${od > 1 ? 's' : ''}`, tab: 'disputes', icon: '⚠️' });
-        const unread = (d.notifications || []).filter((n: any) => !n.read).length;
-        if (unread > 0) items.push({ label: `${unread} unread notification${unread > 1 ? 's' : ''}`, tab: 'messages', icon: '🔔' });
-        setNotifItems(items);
-        setNotifCount(od + unread);
-      }).catch(() => {});
-    }
-  }, [user]);
+
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
@@ -261,18 +327,84 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
         <Link href="/?page=login" className="btn-login">Login</Link></>}
         {user && <>
           <div style={{ position: "relative", display: "inline-flex" }}>
-            <a href={dashUrl(user.role)} onClick={e => { if (notifCount > 0) { e.preventDefault(); setShowNotifDrop(!showNotifDrop); } }} style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#3ea136", borderRadius: 3, textDecoration: "none", fontWeight: 600, display: "inline-flex", alignItems: "center", cursor: notifCount > 0 ? "pointer" : "default" }}>Dashboard{notifCount > 0 && <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>{notifCount}</span>}</a>
-            {showNotifDrop && notifItems.length > 0 && (
-              <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: "#fff", border: "1px solid #ddd", borderRadius: 6, padding: 6, minWidth: 260, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#333", padding: "4px 8px 6px", borderBottom: "1px solid #eee" }}>Notifications</div>
-                {notifItems.map((item, i) => (
-                  <a key={i} href={`${dashUrl(user!.role)}&tab=${item.tab}`} onClick={() => setShowNotifDrop(false)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 4, textDecoration: "none", color: "#333", fontSize: 12, transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "#f5f5f5")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                    <span>{item.icon}</span>
-                    <span style={{ flex: 1 }}>{item.label}</span>
-                    <span style={{ fontSize: 10, color: "#999" }}>&rsaquo;</span>
-                  </a>
-                ))}
-                <a href={dashUrl(user!.role)} onClick={() => setShowNotifDrop(false)} style={{ display: "block", textAlign: "center", padding: "6px 8px", marginTop: 4, borderTop: "1px solid #eee", fontSize: 11, color: "#3ea136", fontWeight: 600, textDecoration: "none" }}>View all in Dashboard</a>
+            <a href={dashUrl(user.role)} onClick={e => { e.preventDefault(); if (notifTotal > 0) setShowNotifDrop(!showNotifDrop); else window.location.href = dashUrl(user.role); }} style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#3ea136", borderRadius: 3, textDecoration: "none", fontWeight: 600, display: "inline-flex", alignItems: "center", cursor: "pointer" }}>Dashboard{notifTotal > 0 && <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>{notifTotal}</span>}</a>
+            {showNotifDrop && (
+              <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: "#fff", border: "1px solid #ddd", borderRadius: 8, padding: 0, minWidth: 320, maxWidth: 380, zIndex: 100, boxShadow: "0 4px 16px rgba(0,0,0,0.15)", maxHeight: 420, overflowY: "auto" }}>
+                {/* Header */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #eee" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#333" }}>🔔 Notifications {notifTotal > 0 && `(${notifTotal})`}</span>
+                  {notifTotal > 0 && <button onClick={async () => { await fetch('/api/notifications?markRead=all'); setNotifTotal(0); setNotifSections([]); setNotifGrouped({}); }} style={{ background: "none", border: "none", color: "#1976d2", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>Mark All Read</button>}
+                </div>
+                {notifTotal === 0 ? (
+                  <div style={{ padding: 24, textAlign: "center", color: "#aaa", fontSize: 12 }}>No new notifications</div>
+                ) : (
+                  <div style={{ padding: "4px 0" }}>
+                    {notifSections.map(s => {
+                      const meta = SECTION_META[s.section] || SECTION_META.general;
+                      const isExpanded = expandedSections.has(s.section);
+                      const items = notifGrouped[s.section] || [];
+                      return (
+                        <div key={s.section}>
+                          {/* Section header */}
+                          <div
+                            onClick={() => {
+                              const next = new Set(expandedSections);
+                              if (next.has(s.section)) next.delete(s.section); else next.add(s.section);
+                              setExpandedSections(next);
+                            }}
+                            style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer", transition: "background 0.15s" }}
+                            onMouseEnter={e => (e.currentTarget.style.background = "#f9f9f9")}
+                            onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                          >
+                            <span style={{ fontSize: 10, color: "#999", width: 12, textAlign: "center" }}>{isExpanded ? '▼' : '▶'}</span>
+                            <span style={{ fontSize: 14 }}>{meta.icon}</span>
+                            <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "#333" }}>{meta.label}</span>
+                            <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 5px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{s.count}</span>
+                          </div>
+                          {/* Expanded items */}
+                          {isExpanded && items.length > 0 && (
+                            <div style={{ background: "#fafafa" }}>
+                              {items.slice(0, 8).map((item: any) => (
+                                <div
+                                  key={item.id}
+                                  onClick={async () => {
+                                    if (item.id && !item.id.startsWith('dash-')) {
+                                      await fetch(`/api/notifications?markRead=${item.id}`);
+                                      setNotifTotal(prev => Math.max(0, prev - 1));
+                                      setNotifSections(prev => prev.map(sec => sec.section === s.section ? { ...sec, count: Math.max(0, sec.count - 1) } : sec).filter(sec => sec.count > 0));
+                                    }
+                                    setShowNotifDrop(false);
+                                    if (item.link) window.location.href = item.link;
+                                    else window.location.href = `${dashUrl(user!.role)}&tab=${meta.tab}`;
+                                  }}
+                                  style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 14px 6px 36px", cursor: "pointer", transition: "background 0.15s" }}
+                                  onMouseEnter={e => (e.currentTarget.style.background = "#f0f0f0")}
+                                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                                >
+                                  <span style={{ fontSize: 8, color: "#1976d2", marginTop: 4 }}>●</span>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 11, fontWeight: 600, color: "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.title}</div>
+                                    {item.message && <div style={{ fontSize: 10, color: "#888", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.message}</div>}
+                                  </div>
+                                  <span style={{ fontSize: 9, color: "#aaa", flexShrink: 0, marginTop: 2 }}>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                </div>
+                              ))}
+                              {items.length > 8 && <div style={{ padding: '4px 14px 4px 36px', fontSize: 10, color: '#999' }}>+{items.length - 8} more</div>}
+                              <div
+                                onClick={() => { setShowNotifDrop(false); window.location.href = `${dashUrl(user!.role)}&tab=${meta.tab}`; }}
+                                style={{ padding: '6px 14px 6px 36px', fontSize: 11, color: '#1976d2', fontWeight: 600, cursor: 'pointer' }}
+                              >View all →</div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {/* Footer */}
+                <div style={{ borderTop: "1px solid #eee", padding: "8px 14px", textAlign: "center" }}>
+                  <a href={dashUrl(user!.role)} onClick={() => setShowNotifDrop(false)} style={{ fontSize: 11, color: "#3ea136", fontWeight: 600, textDecoration: "none" }}>View all in Dashboard</a>
+                </div>
               </div>
             )}
           </div>
@@ -303,7 +435,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
         <Link href="/?page=faq">FAQ</Link>
         <Link href="/?page=rules">Terms of use</Link>
         {!user && <Link href="/?page=seller-register" className="nav-seller">Become a seller</Link>}
-        {user && <a href={dashUrl(user.role)} onClick={e => { if (notifCount > 0) { e.preventDefault(); setShowNotifDrop(!showNotifDrop); } }} style={{ color: "#5fa830", fontWeight: 600, marginLeft: 8, position: "relative", display: "inline-flex", alignItems: "center", cursor: notifCount > 0 ? "pointer" : "default" }}>Dashboard{notifCount > 0 && <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>{notifCount}</span>}</a>}
+        {user && <a href={dashUrl(user.role)} onClick={e => { e.preventDefault(); if (notifTotal > 0) setShowNotifDrop(!showNotifDrop); else window.location.href = dashUrl(user.role); }} style={{ color: "#5fa830", fontWeight: 600, marginLeft: 8, position: "relative", display: "inline-flex", alignItems: "center", cursor: "pointer" }}>Dashboard{notifTotal > 0 && <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>{notifTotal}</span>}</a>}
       </div>
 
       {/* HEADER: Logo + Category + Search */}

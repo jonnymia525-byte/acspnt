@@ -9,7 +9,7 @@ import { platformLabel } from "@/lib/totp";
 
 interface Data {
   user: { id: string; username: string; name: string; role: string; balance: number; vendorStatus: string; twoFaEnabled: boolean };
-  stats: { balance: number; totalRevenue: number; totalUnits: number; totalProducts: number; activeProducts: number; avgRating: number; pendingProducts: number; pendingWithdrawals: number; lowStockCount: number };
+  stats: { balance: number; totalRevenue: number; totalUnits: number; totalProducts: number; activeProducts: number; avgRating: number; pendingProducts: number; pendingWithdrawals: number; lowStockCount: number; totalAccountsInStock: number; accountsSold: number; pendingApprovalAccounts: number; liveAccounts: number };
   products: Array<{ id: string; title: string; platform: string; category: string; vendorPrice: number; storePrice: number; stock: number; status: string }>;
   sales: Array<{ id: string; quantity: number; total: number; createdAt: string; product: { title: string }; buyer: { username: string } }>;
   withdrawals: Array<{ id: string; amount: number; netAmount: number; fee: number; method: string; status: string; createdAt: string }>;
@@ -27,6 +27,7 @@ const TABS = [
   { key: "add-listing", label: "Add Listing" },
   { key: "my-products", label: "My Products" },
   { key: "sales-overview", label: "Sales Overview" },
+  { key: "inventory", label: "Inventory" },
   { key: "payouts", label: "Payouts" },
   { key: "deposits", label: "Deposits" },
 ];
@@ -158,9 +159,11 @@ export function VendorDashboard() {
     if (!uploadAccounts.trim()) return;
     setCheckingDupes(true);
     try {
-      const params = new URLSearchParams({ accounts: uploadAccounts });
-      if (uploadProductId) params.set("productId", uploadProductId);
-      const res = await fetch(`/api/vendor/products/upload-more?${params}`);
+      const res = await fetch(`/api/vendor/products/upload-more`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check_duplicates", productId: uploadProductId, accounts: uploadAccounts }),
+      });
       const r = await res.json();
       setDupes(r.duplicates || []);
       if ((r.duplicateCount || 0) === 0) {
@@ -303,11 +306,49 @@ export function VendorDashboard() {
                     </div>
                   ))}
                 </div>
+                {/* Account Inventory Stats */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 16 }}>
+                  {[
+                    { l: "Total Accounts", v: data.stats.totalAccountsInStock || 0, c: "#1976d2", icon: "📦" },
+                    { l: "Live Accounts", v: data.stats.liveAccounts || 0, c: "#3ea136", icon: "✅" },
+                    { l: "Accounts Sold", v: data.stats.accountsSold || 0, c: "#333", icon: "💰" },
+                    { l: "Pending Approval", v: data.stats.pendingApprovalAccounts || 0, c: data.stats.pendingApprovalAccounts > 0 ? "#eab308" : "#333", icon: "⏳" },
+                  ].map(s => (
+                    <div key={s.l} className="stat" style={{ background: s.v > 0 || s.l === "Total Accounts" ? "#f8f9fa" : "#fff3e0", borderLeft: `3px solid ${s.c}` }}>
+                      <div style={{ fontSize: 14, marginBottom: 2 }}>{s.icon}</div>
+                      <div className="num" style={{ color: s.c, fontSize: 20 }}>{s.v.toLocaleString()}</div>
+                      <div className="lbl">{s.l}</div>
+                    </div>
+                  ))}
+                </div>
                 {data.stockAlerts.lowStock.length + data.stockAlerts.outOfStock.length > 0 && (
                   <div className="panel" style={{ marginBottom: 16, borderLeft: "3px solid #eab308" }}>
-                    <div className="panel-head" style={{ background: "#854d0e" }}>Stock Alerts ({data.stockAlerts.lowStock.length + data.stockAlerts.outOfStock.length})</div>
-                    {data.stockAlerts.outOfStock.map(p => <div key={p.id} className="row"><span style={{ color: "#e53e3e", fontSize: 12 }}>OUT OF STOCK</span><span style={{ flex: 1, fontSize: 13 }}>{p.title}</span><button className="btn btn-danger btn-sm" onClick={() => setTab("add-listing")}>Restock</button></div>)}
-                    {data.stockAlerts.lowStock.map(p => <div key={p.id} className="row"><span style={{ color: "#eab308", fontSize: 12 }}>LOW ({p.stock})</span><span style={{ flex: 1, fontSize: 13 }}>{p.title}</span></div>)}
+                    <div className="panel-head" style={{ background: "#854d0e", display: "flex", alignItems: "center", gap: 8 }}>
+                      <span>⚠️</span>
+                      <span>Stock Alerts ({data.stockAlerts.lowStock.length + data.stockAlerts.outOfStock.length})</span>
+                    </div>
+                    {data.stockAlerts.outOfStock.length > 0 && (
+                      <div style={{ padding: "12px 16px", background: "#fef2f2", borderBottom: "1px solid #fecaca" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#991b1b", marginBottom: 8 }}>🚫 OUT OF STOCK ({data.stockAlerts.outOfStock.length})</div>
+                        {data.stockAlerts.outOfStock.map(p => (
+                          <div key={p.id} className="row" style={{ padding: "8px 0", borderBottom: "1px solid #fee2e2" }}>
+                            <span style={{ flex: 1, fontSize: 13 }}>{p.title}</span>
+                            <button className="btn btn-danger btn-sm" onClick={() => setTab("add-listing")}>Restock Now</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {data.stockAlerts.lowStock.length > 0 && (
+                      <div style={{ padding: "12px 16px", background: "#fffbeb" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 8 }}>📉 LOW STOCK ({data.stockAlerts.lowStock.length})</div>
+                        {data.stockAlerts.lowStock.map(p => (
+                          <div key={p.id} className="row" style={{ padding: "8px 0", borderBottom: "1px solid #fef3c7" }}>
+                            <span style={{ flex: 1, fontSize: 13 }}>{p.title}</span>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: "#d97706" }}>{p.stock} left</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="panel">
@@ -666,6 +707,92 @@ export function VendorDashboard() {
                     </div>
                   </>
                 )}
+              </>
+            )}
+
+            {/* INVENTORY */}
+            {tab === "inventory" && (
+              <>
+                {/* Inventory Stats Summary */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 16 }}>
+                  {[
+                    { l: "Total Accounts", v: data.stats.totalAccountsInStock || 0, c: "#1976d2", bg: "#e3f2fd" },
+                    { l: "Live (Approved)", v: data.stats.liveAccounts || 0, c: "#3ea136", bg: "#e8f5e9" },
+                    { l: "Pending Approval", v: data.stats.pendingApprovalAccounts || 0, c: data.stats.pendingApprovalAccounts > 0 ? "#d97706" : "#666", bg: data.stats.pendingApprovalAccounts > 0 ? "#fffbeb" : "#f5f5f5" },
+                    { l: "Accounts Sold", v: data.stats.accountsSold || 0, c: "#333", bg: "#f5f5f5" },
+                    { l: "Low Stock", v: data.stockAlerts.lowStock.length, c: data.stockAlerts.lowStock.length > 0 ? "#d97706" : "#666", bg: data.stockAlerts.lowStock.length > 0 ? "#fffbeb" : "#f5f5f5" },
+                    { l: "Out of Stock", v: data.stockAlerts.outOfStock.length, c: data.stockAlerts.outOfStock.length > 0 ? "#dc2626" : "#666", bg: data.stockAlerts.outOfStock.length > 0 ? "#fef2f2" : "#f5f5f5" },
+                  ].map(s => (
+                    <div key={s.l} style={{ background: s.bg, borderRadius: 8, padding: 12, textAlign: "center", border: `1px solid ${s.c}22` }}>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: s.c }}>{s.v.toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: "#666", fontWeight: 600 }}>{s.l}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Out of Stock Alert */}
+                {data.stockAlerts.outOfStock.length > 0 && (
+                  <div className="panel" style={{ marginBottom: 16, borderLeft: "3px solid #dc2626" }}>
+                    <div className="panel-head" style={{ background: "#991b1b" }}>🚫 Out of Stock ({data.stockAlerts.outOfStock.length})</div>
+                    {data.stockAlerts.outOfStock.map(p => (
+                      <div key={p.id} className="row">
+                        <span style={{ flex: 1, fontSize: 13 }}>{p.title}</span>
+                        <button className="btn btn-danger btn-sm" onClick={() => setTab("add-listing")}>Restock</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Low Stock Alert */}
+                {data.stockAlerts.lowStock.length > 0 && (
+                  <div className="panel" style={{ marginBottom: 16, borderLeft: "3px solid #d97706" }}>
+                    <div className="panel-head" style={{ background: "#92400e" }}>📉 Low Stock ({data.stockAlerts.lowStock.length})</div>
+                    {data.stockAlerts.lowStock.map(p => (
+                      <div key={p.id} className="row">
+                        <span style={{ flex: 1, fontSize: 13 }}>{p.title}</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "#d97706" }}>{p.stock} accounts left</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* All Products Inventory */}
+                <div className="panel">
+                  <div className="panel-head">All Products Inventory ({data.products.length})</div>
+                  {data.products.length === 0 ? (
+                    <div style={{ padding: 20, color: "#888", fontSize: 13, textAlign: "center" }}>No products yet</div>
+                  ) : (
+                    <>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 80px 80px", gap: 8, padding: "8px 16px", fontSize: 11, fontWeight: 700, color: "#666", borderBottom: "1px solid #eee" }}>
+                        <span>Product</span>
+                        <span style={{ textAlign: "center" }}>Stock</span>
+                        <span style={{ textAlign: "center" }}>Status</span>
+                        <span style={{ textAlign: "center" }}>Revenue</span>
+                      </div>
+                      {data.products.map(p => (
+                        <div key={p.id} style={{ display: "grid", gridTemplateColumns: "1fr 80px 80px 80px", gap: 8, padding: "10px 16px", borderBottom: "1px solid #f5f5f5", alignItems: "center" }}>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{p.title}</div>
+                            <div style={{ fontSize: 11, color: "#888" }}>{p.platform} · {money(p.vendorPrice)}</div>
+                          </div>
+                          <div style={{ textAlign: "center" }}>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: p.stock === 0 ? "#dc2626" : p.stock <= 5 ? "#d97706" : "#3ea136" }}>
+                              {p.stock}
+                            </span>
+                          </div>
+                          <div style={{ textAlign: "center" }}>
+                            <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: p.status === "approved" ? "#e8f5e9" : p.status === "pending" ? "#fffbeb" : "#fef2f2", color: p.status === "approved" ? "#3ea136" : p.status === "pending" ? "#d97706" : "#dc2626" }}>
+                              {p.status}
+                            </span>
+                          </div>
+                          <div style={{ textAlign: "center", fontSize: 12, fontWeight: 600 }}>
+                            {money(p.vendorPrice * (data.stats.totalUnits || 0))}
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
               </>
             )}
 

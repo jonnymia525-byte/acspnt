@@ -148,7 +148,10 @@ export function AuthPage({ initialTab }: Props) {
                 <button type="submit" disabled={loading || captcha === null} className="btn btn-primary" style={{ width: "100%" }}>
                   {loading ? "Logging in..." : "Login"}
                 </button>
-                <Link href="/?page=register" style={{ textAlign: "center", fontSize: 12, color: "#3ea136" }}>No account? Sign up</Link>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Link href="/?page=forgot-password" style={{ fontSize: 12, color: '#e53e3e' }}>Forgot password?</Link>
+                  <Link href="/?page=register" style={{ fontSize: 12, color: '#3ea136' }}>No account? Sign up</Link>
+                </div>
               </form>
             ) : tab === "signup" ? (
               <form onSubmit={handleSignup} style={{ display: "flex", flexDirection: "column", gap: 12 }}>

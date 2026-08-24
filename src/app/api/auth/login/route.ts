@@ -2,17 +2,18 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
 import { cookies } from "next/headers";
+import { geoLookup } from "@/lib/geo";
 
-// Simple in-memory rate limiter: max 5 attempts per IP per 15 minutes
+// Rate limiter: max 5 attempts per key per 15 minutes (both IP and username)
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
-function checkRateLimit(ip: string): boolean {
+function checkRateLimit(key: string, maxAttempts = 5): boolean {
   const now = Date.now();
-  const entry = loginAttempts.get(ip);
+  const entry = loginAttempts.get(key);
   if (!entry || now > entry.resetAt) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + 15 * 60 * 1000 });
+    loginAttempts.set(key, { count: 1, resetAt: now + 15 * 60 * 1000 });
     return true;
   }
-  if (entry.count >= 5) return false;
+  if (entry.count >= maxAttempts) return false;
   entry.count++;
   return true;
 }
@@ -37,6 +38,11 @@ export async function POST(req: Request) {
     });
     if (!user) return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
 
+    // Per-username rate limit (prevents brute-force even with IP rotation)
+    if (!checkRateLimit(`user:${user.id}`, 5)) {
+      return NextResponse.json({ error: "Too many attempts for this account. Please try again in 15 minutes." }, { status: 429 });
+    }
+
     // Check password
     const valid = await bcryptjs.compare(password, user.password);
     if (!valid) return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
@@ -56,8 +62,48 @@ export async function POST(req: Request) {
     // Update last login
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
 
-    // Log activity
-    await prisma.activityLog.create({ data: { action: "login", description: `User ${user.username} logged in`, userId: user.id } });
+    // Log activity with IP/geo/userAgent
+    const userAgent = req.headers.get("user-agent") || "";
+    const geo = await geoLookup(ip);
+    await prisma.activityLog.create({
+      data: {
+        action: "login",
+        description: `User ${user.username} logged in`,
+        userId: user.id,
+        ip,
+        country: geo?.country || null,
+        city: geo?.city || null,
+        userAgent,
+      },
+    });
+
+    // Detect unusual activity: flag if login from new country
+    const recentLogins = await prisma.activityLog.findMany({
+      where: { userId: user.id, action: "login" },
+      select: { country: true, ip: true },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    });
+    const knownCountries = new Set(recentLogins.map(l => l.country).filter(Boolean));
+    const isNewCountry = geo?.country && !knownCountries.has(geo.country);
+    const knownIps = new Set(recentLogins.map(l => l.ip).filter(Boolean));
+    const isNewIp = ip && !knownIps.has(ip);
+    const flags: string[] = [];
+    if (isNewCountry) flags.push(`New country: ${geo!.country}`);
+    if (isNewIp) flags.push(`New IP: ${ip}`);
+    if (flags.length > 0) {
+      await prisma.activityLog.create({
+        data: {
+          action: "security",
+          description: flags.join(" | "),
+          userId: user.id,
+          ip,
+          country: geo?.country || null,
+          city: geo?.city || null,
+          userAgent,
+        },
+      });
+    }
 
     return NextResponse.json({
       success: true,

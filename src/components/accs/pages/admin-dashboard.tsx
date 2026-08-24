@@ -48,7 +48,7 @@ interface UserDetail extends User {
   withdrawals: Array<{ id: string; amount: number; netAmount: number; fee: number; method: string; status: string; createdAt: string }>;
   reviews: Array<{ id: string; rating: number; comment: string; createdAt: string; product: { title: string } }>;
   products: Array<{ id: string; title: string; platform: string; storePrice: number; stock: number; status: string; createdAt: string }>;
-  activityLogs: Array<{ id: string; action: string; description: string; createdAt: string }>;
+  activityLogs: Array<{ id: string; action: string; description: string; ip?: string; country?: string; city?: string; userAgent?: string; createdAt: string }>;
   sentMessages: Array<{ id: string; title: string; message: string; read: boolean; createdAt: string }>;
   disputes: Array<{ id: string; reason: string; status: string; resolution: string | null; createdAt: string }>;
 }
@@ -713,6 +713,8 @@ export function AdminDashboard() {
                     <div style={{ fontSize: 12, color: "#888" }}>{selectedUser.email}</div>
                     <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                       <div><div style={{ fontSize: 11, color: "#888" }}>Balance</div><div style={{ fontSize: 14, fontWeight: 700, color: "#3ea136" }}>{money(selectedUser.balance)}</div></div>
+                      <div><div style={{ fontSize: 11, color: "#888" }}>Last Login</div><div style={{ fontSize: 12, fontWeight: 600 }}>{selectedUser.lastLogin ? new Date(selectedUser.lastLogin).toLocaleString() : 'Never'}</div></div>
+                      <div><div style={{ fontSize: 11, color: "#888" }}>Reg. IP</div><div style={{ fontSize: 12, fontWeight: 600, fontFamily: 'monospace' }}>{(selectedUser as any).registrationIp || 'N/A'}</div></div>
                       <div><div style={{ fontSize: 11, color: "#888" }}>Role</div><div style={{ fontSize: 14, fontWeight: 600 }}>{selectedUser.role}</div></div>
                       <div><div style={{ fontSize: 11, color: "#888" }}>Registered</div><div style={{ fontSize: 12 }}>{new Date(selectedUser.registeredAt).toLocaleDateString()}</div></div>
                       <div><div style={{ fontSize: 11, color: "#888" }}>Last Login</div><div style={{ fontSize: 12 }}>{selectedUser.lastLogin ? new Date(selectedUser.lastLogin).toLocaleString() : "Never"}</div></div>
@@ -811,6 +813,10 @@ export function AdminDashboard() {
                                 {item.buyer?.username && `buyer: ${item.buyer.username} · `}
                                 {item.message && item.message.substring(0, 80)}
                                 {item.status && ` · ${item.status}`}
+                                {item.ip && detailTab === "activity" && ` · IP: ${item.ip}`}
+                                {item.country && detailTab === "activity" && ` · ${item.country}`}
+                                {item.city && detailTab === "activity" && `, ${item.city}`}
+                                {item.action === "security" && detailTab === "activity" && <span style={{ color: '#e53e3e', fontWeight: 600 }}> ⚠️</span>}
                               </div>
                             </div>
                             <span style={{ fontWeight: 600, color: "#3ea136" }}>{item.total ? money(item.total) : item.amount ? money(item.amount) : item.rating ? `${item.rating}/5` : ""}</span>
@@ -2140,7 +2146,8 @@ export function AdminDashboard() {
                   if (!vr) return;
                   await fetch("/api/admin/actions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reject_vendor", requestId: vrRejectId, userId: vr.userId, reason: vrRejectReason }) });
                   if (vrMuteDays === -1) {
-                    await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "toggle_block", userId: vr.userId, blocked: false }) });
+                    // toggle_block now reads current state server-side
+                    await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "toggle_block", userId: vr.userId }) });
                   } else if (vrMuteDays > 0) {
                     await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "set_mute", userId: vr.userId, muteDays: vrMuteDays }) });
                   }

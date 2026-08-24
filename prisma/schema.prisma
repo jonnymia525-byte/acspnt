@@ -74,6 +74,7 @@ model User {
   chatSessions       ChatSession[] @relation("ChatUser")
   assignedSessions   ChatSession[] @relation("ChatAssignee")
   chatSentMessages   ChatMessage[] @relation("ChatSender")
+  passwordReset      PasswordReset?
 
   @@index([role])
   @@index([vendorStatus])
@@ -372,12 +373,17 @@ model ActivityLog {
   action      String
   description String   @default("")
   ip          String?
+  country     String?
+  city        String?
+  userAgent   String?
   createdAt   DateTime @default(now())
 
   userId      String
   user        User     @relation(fields: [userId], references: [id])
 
   @@index([userId])
+  @@index([action])
+  @@index([ip])
 }
 
 model VendorRequest {
@@ -606,4 +612,16 @@ model ChatMessage {
 
   @@index([sessionId])
   @@index([senderId])
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([token])
 }

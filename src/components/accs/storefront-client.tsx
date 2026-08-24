@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from "react";
 import { useStore, User } from "@/store";
 import { getDictionary, LANGUAGES, Dict } from "@/lib/i18n";
 import { platformColor, categoryLabel, platformLabel } from "@/lib/totp";
+import { sanitizeHtml } from "@/lib/sanitize";
 import { money } from "@/lib/money";
 import { BuyModal } from "./widgets/buy-modal";
 import { ChatWidget } from "./widgets/chat-widget";
@@ -472,7 +473,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
 
       {/* NOTICE */}
       {siteNotice && (
-        <div className="notice" dangerouslySetInnerHTML={{ __html: siteNotice.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<iframe[\s\S]*?<\/iframe>/gi, '').replace(/<object[\s\S]*?<\/object>/gi, '').replace(/<embed[^>]*\/?>/gi, '').replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '').replace(/javascript:/gi, '').replace(/data:/gi, '').replace(/accspoint\.news/g, '<a href="#">accspoint.news</a>') }} />
+        <div className="notice" dangerouslySetInnerHTML={{ __html: sanitizeHtml(siteNotice) }} />
       )}
 
       {/* BREADCRUMBS */}

@@ -4,6 +4,9 @@ import { sendEmail } from "@/lib/send-email";
 import { cookies } from "next/headers";
 import { money } from "@/lib/money";
 
+// Max manual top-up cap to prevent abuse
+const MAX_TOPUP = 100_000;
+
 export async function POST(req: Request) {
   try {
     const cookieStore = await cookies();
@@ -138,19 +141,27 @@ export async function POST(req: Request) {
         if (!Number.isFinite(amount) || amount <= 0) {
           return NextResponse.json({ error: "Amount must be greater than 0" }, { status: 400 });
         }
+        if (amount > MAX_TOPUP) {
+          return NextResponse.json({ error: `Amount exceeds max top-up limit of $${MAX_TOPUP.toLocaleString()}` }, { status: 400 });
+        }
         const user = await prisma.user.findUnique({ where: { id: targetId } });
         if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-        const updated = await prisma.user.update({
-          where: { id: user.id },
-          data: { balance: { increment: amount } },
+        // Atomic transaction: update balance, create deposit record, create transaction record
+        const updated = await prisma.$transaction(async (tx) => {
+          const u = await tx.user.update({
+            where: { id: user.id },
+            data: { balance: { increment: amount } },
+          });
+          await tx.deposit.create({
+            data: { amount, method: "manual", status: "completed", completedAt: new Date(), userId: user.id },
+          });
+          await tx.transaction.create({
+            data: { type: "topup", amount, description: "Admin manual top-up", userId: user.id },
+          });
+          return u;
         });
-        await prisma.deposit.create({
-          data: { amount, method: "manual", status: "completed", completedAt: new Date(), userId: user.id },
-        });
-        await prisma.transaction.create({
-          data: { type: "topup", amount, description: "Admin manual top-up", userId: user.id },
-        });
+
         await prisma.notification.create({
           data: { title: "Balance topped up", message: `${money(amount)} added by admin`, type: "success", userId: user.id },
         });
@@ -170,6 +181,11 @@ export async function POST(req: Request) {
         const withdrawalId = String(body.withdrawalId ?? "");
         const withdrawal = await prisma.withdrawal.findUnique({ where: { id: withdrawalId }, include: { user: true } });
         if (!withdrawal) return NextResponse.json({ error: "Withdrawal not found" }, { status: 404 });
+
+        // CRITICAL: Only pending withdrawals can be completed
+        if (withdrawal.status !== "pending") {
+          return NextResponse.json({ error: `Cannot complete withdrawal with status "${withdrawal.status}"` }, { status: 400 });
+        }
 
         await prisma.withdrawal.update({
           where: { id: withdrawal.id },
@@ -199,17 +215,26 @@ export async function POST(req: Request) {
         const withdrawal = await prisma.withdrawal.findUnique({ where: { id: withdrawalId }, include: { user: true } });
         if (!withdrawal) return NextResponse.json({ error: "Withdrawal not found" }, { status: 404 });
 
-        await prisma.withdrawal.update({
-          where: { id: withdrawal.id },
-          data: { status: "rejected", rejectReason: reason },
+        // CRITICAL: Only pending withdrawals can be rejected (prevents double refund)
+        if (withdrawal.status !== "pending") {
+          return NextResponse.json({ error: `Cannot reject withdrawal with status "${withdrawal.status}"` }, { status: 400 });
+        }
+
+        // Atomic: reject + refund balance + create transaction in one go
+        await prisma.$transaction(async (tx) => {
+          await tx.withdrawal.update({
+            where: { id: withdrawal.id },
+            data: { status: "rejected", rejectReason: reason },
+          });
+          await tx.user.update({
+            where: { id: withdrawal.userId },
+            data: { balance: { increment: withdrawal.netAmount } },
+          });
+          await tx.transaction.create({
+            data: { type: "withdrawal_refund", amount: withdrawal.netAmount, description: "Withdrawal rejected refund", userId: withdrawal.userId },
+          });
         });
-        await prisma.user.update({
-          where: { id: withdrawal.userId },
-          data: { balance: { increment: withdrawal.netAmount } },
-        });
-        await prisma.transaction.create({
-          data: { type: "withdrawal_refund", amount: withdrawal.netAmount, description: "Withdrawal rejected refund", userId: withdrawal.userId },
-        });
+
         await prisma.notification.create({
           data: { title: "Withdrawal rejected", message: `Your withdrawal of ${money(withdrawal.amount)} was rejected: ${reason}`, type: "error", userId: withdrawal.userId },
         });
@@ -232,22 +257,31 @@ export async function POST(req: Request) {
         const dispute = await prisma.dispute.findUnique({ where: { id: disputeId }, include: { buyer: true } });
         if (!dispute) return NextResponse.json({ error: "Dispute not found" }, { status: 404 });
 
-        await prisma.dispute.update({
-          where: { id: dispute.id },
-          data: { status: "resolved", resolution, resolvedAt: new Date() },
-        });
-        if (refundBuyer && dispute.purchaseId) {
-          const purchase = await prisma.purchase.findUnique({ where: { id: dispute.purchaseId } });
-          if (purchase) {
-            await prisma.user.update({
-              where: { id: dispute.buyerId },
-              data: { balance: { increment: purchase.total } },
-            });
-            await prisma.transaction.create({
-              data: { type: "dispute_refund", amount: purchase.total, description: "Dispute resolved refund", userId: dispute.buyerId },
-            });
-          }
+        // CRITICAL: Only open disputes can be resolved (prevents replay refunds)
+        if (dispute.status !== "open") {
+          return NextResponse.json({ error: `Cannot resolve dispute with status "${dispute.status}"` }, { status: 400 });
         }
+
+        // Atomic: resolve dispute + optional refund in one transaction
+        await prisma.$transaction(async (tx) => {
+          await tx.dispute.update({
+            where: { id: dispute.id },
+            data: { status: "resolved", resolution, resolvedAt: new Date() },
+          });
+          if (refundBuyer && dispute.purchaseId) {
+            const purchase = await tx.purchase.findUnique({ where: { id: dispute.purchaseId } });
+            if (purchase) {
+              await tx.user.update({
+                where: { id: dispute.buyerId },
+                data: { balance: { increment: purchase.total } },
+              });
+              await tx.transaction.create({
+                data: { type: "dispute_refund", amount: purchase.total, description: "Dispute resolved refund", userId: dispute.buyerId },
+              });
+            }
+          }
+        });
+
         await prisma.activityLog.create({
           data: { action: "dispute_resolved", description: `Dispute ${dispute.id} resolved`, userId: admin.id },
         });
@@ -267,19 +301,24 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true });
       }
       case "create_coupon": {
-        const code = String(body.code ?? "").toUpperCase();
+        const code = String(body.code ?? "").toUpperCase().trim();
         const type = String(body.type ?? "");
         const value = Number(body.value);
-        if (!code || (type !== "percentage" && type !== "fixed") || !Number.isFinite(value) || value <= 0) {
+        if (!code || code.length > 20 || (type !== "percentage" && type !== "fixed") || !Number.isFinite(value) || value <= 0) {
           return NextResponse.json({ error: "Invalid coupon data" }, { status: 400 });
+        }
+        // Check uniqueness
+        const existing = await prisma.coupon.findFirst({ where: { code, deletedAt: null } });
+        if (existing) {
+          return NextResponse.json({ error: "Coupon code already exists" }, { status: 400 });
         }
         const coupon = await prisma.coupon.create({
           data: {
             code,
             type,
             value,
-            minOrder: Number(body.minOrder) || 0,
-            maxUses: body.maxUses === undefined || body.maxUses === null ? -1 : Number(body.maxUses),
+            minOrder: Math.max(0, Number(body.minOrder) || 0),
+            maxUses: body.maxUses === undefined || body.maxUses === null ? -1 : Math.max(1, Number(body.maxUses)),
             expiresAt: body.expiresAt ? new Date(String(body.expiresAt)) : null,
           },
         });

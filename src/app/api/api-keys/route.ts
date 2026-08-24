@@ -25,16 +25,20 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
   });
 
-  // Mask keys for display
+  // NEVER return the full key — only masked version
   const maskedKeys = keys.map(k => ({
-    ...k,
+    id: k.id,
+    name: k.name,
     keyMasked: k.key.substring(0, 8) + "..." + k.key.substring(k.key.length - 4),
+    active: k.active,
+    lastUsed: k.lastUsed,
+    createdAt: k.createdAt,
   }));
 
   return NextResponse.json({ keys: maskedKeys });
 }
 
-// POST - create/revoke API key
+// POST - create/revoke/delete API key
 export async function POST(req: Request) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -43,14 +47,14 @@ export async function POST(req: Request) {
   const { action, keyId, name } = body;
 
   if (action === "create") {
-    const keyName = name || `API Key ${new Date().toLocaleDateString()}`;
+    const keyName = (name || `API Key ${new Date().toLocaleDateString()}`).substring(0, 100);
     const key = generateApiKey();
 
     const apiKey = await prisma.apiKey.create({
       data: { name: keyName, key, userId: user.id },
     });
 
-    // Return full key only on creation
+    // Return full key ONLY on creation
     return NextResponse.json({
       success: true,
       key: { id: apiKey.id, name: apiKey.name, key: apiKey.key, createdAt: apiKey.createdAt },
@@ -58,13 +62,18 @@ export async function POST(req: Request) {
     });
   }
 
-  if (action === "revoke" && keyId) {
-    await prisma.apiKey.update({ where: { id: keyId }, data: { active: false } });
-    return NextResponse.json({ success: true });
-  }
+  if ((action === "revoke" || action === "delete") && keyId) {
+    // CRITICAL: Ownership check — users can only modify their own keys
+    const key = await prisma.apiKey.findUnique({ where: { id: keyId } });
+    if (!key || key.userId !== user.id) {
+      return NextResponse.json({ error: "Key not found" }, { status: 404 });
+    }
 
-  if (action === "delete" && keyId) {
-    await prisma.apiKey.delete({ where: { id: keyId } });
+    if (action === "revoke") {
+      await prisma.apiKey.update({ where: { id: keyId }, data: { active: false } });
+    } else {
+      await prisma.apiKey.delete({ where: { id: keyId } });
+    }
     return NextResponse.json({ success: true });
   }
 

@@ -78,7 +78,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const user = await requireUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (user.role !== "vendor" && user.vendorStatus !== "approved") {
+  if (user.role !== "vendor" || user.vendorStatus !== "approved") {
     return NextResponse.json({ error: "Vendor account required" }, { status: 403 });
   }
 

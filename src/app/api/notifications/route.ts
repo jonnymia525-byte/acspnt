@@ -77,14 +77,27 @@ export async function POST(req: Request) {
 
   if (!title || !message) return NextResponse.json({ error: "title and message required" }, { status: 400 });
 
+  // Only admins/moderators can send notifications to other users
+  let recipientId = userId;
+  if (targetUserId && targetUserId !== userId) {
+    const sender = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (!sender || (sender.role !== "admin" && sender.role !== "moderator")) {
+      return NextResponse.json({ error: "Not authorized to send notifications to other users" }, { status: 403 });
+    }
+    recipientId = targetUserId;
+  }
+
+  // Sanitize link — only allow internal URLs
+  const safeLink = link ? (link.startsWith("/") ? link : null) : null;
+
   const notification = await prisma.notification.create({
     data: {
       title,
       message,
       section: section || "general",
-      link: link || null,
+      link: safeLink,
       type: type || "info",
-      userId: targetUserId || userId,
+      userId: recipientId,
     },
   });
 

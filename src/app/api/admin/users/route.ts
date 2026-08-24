@@ -25,7 +25,7 @@ export async function GET(req: Request) {
     const users = await prisma.user.findMany({
       select: {
         id: true, username: true, email: true, name: true, role: true,
-        balance: true, vendorStatus: true, registeredAt: true, lastLogin: true,
+        balance: true, vendorStatus: true, registeredAt: true, lastLogin: true, registrationIp: true,
         vendorCountry: true, contactMethod: true, contactDetail: true,
         muted: true, mutedUntil: true, blocked: true, createdAt: true,
       },
@@ -43,7 +43,7 @@ export async function GET(req: Request) {
       where: { id: userId },
       select: {
         id: true, username: true, email: true, name: true, role: true,
-        balance: true, vendorStatus: true, registeredAt: true, lastLogin: true,
+        balance: true, vendorStatus: true, registeredAt: true, lastLogin: true, registrationIp: true,
         vendorCountry: true, contactMethod: true, contactDetail: true,
         muted: true, mutedUntil: true, blocked: true, createdAt: true, twoFaEnabled: true,
       },
@@ -56,7 +56,7 @@ export async function GET(req: Request) {
       prisma.withdrawal.findMany({ where: { userId }, select: { id: true, amount: true, netAmount: true, fee: true, method: true, status: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 50 }),
       prisma.review.findMany({ where: { buyerId: userId }, select: { id: true, rating: true, comment: true, createdAt: true, product: { select: { title: true } } }, orderBy: { createdAt: "desc" }, take: 20 }),
       prisma.product.findMany({ where: { vendorId: userId }, select: { id: true, title: true, platform: true, storePrice: true, stock: true, status: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 50 }),
-      prisma.activityLog.findMany({ where: { userId }, select: { id: true, action: true, description: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 50 }),
+      prisma.activityLog.findMany({ where: { userId }, select: { id: true, action: true, description: true, ip: true, country: true, city: true, userAgent: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 50 }),
       prisma.notification.findMany({ where: { userId }, select: { id: true, title: true, message: true, read: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 20 }),
       prisma.dispute.findMany({ where: { buyerId: userId }, select: { id: true, reason: true, status: true, resolution: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 20 }),
     ]);
@@ -127,9 +127,11 @@ export async function POST(req: Request) {
     }
 
     case "set_mute": {
-      const muteUntil = data.muteDays ? new Date(Date.now() + data.muteDays * 24 * 60 * 60 * 1000) : null;
+      const muteDays = Number(data.muteDays);
+      // Positive days = temporary mute; 0 or negative or missing = permanent mute
+      const muteUntil = muteDays > 0 ? new Date(Date.now() + muteDays * 24 * 60 * 60 * 1000) : null;
       const user = await prisma.user.update({ where: { id: userId }, data: { muted: true, mutedUntil: muteUntil } });
-      const duration = data.muteDays ? `${data.muteDays} day(s)` : "permanent";
+      const duration = muteDays > 0 ? `${muteDays} day(s)` : "permanent";
       await prisma.notification.create({ data: { userId, title: "Account Muted", message: `Your account has been muted for ${duration}. You cannot perform purchases or actions during this period.` } }).catch(() => {});
       return NextResponse.json({ success: true, muted: user.muted, mutedUntil: user.mutedUntil });
     }
@@ -141,7 +143,10 @@ export async function POST(req: Request) {
     }
 
     case "toggle_block": {
-      const user = await prisma.user.update({ where: { id: userId }, data: { blocked: !data.blocked } });
+      // Fetch current state first — data.blocked from client is unreliable
+      const currentUser = await prisma.user.findUnique({ where: { id: userId }, select: { blocked: true } });
+      const newBlocked = !(currentUser?.blocked ?? false);
+      const user = await prisma.user.update({ where: { id: userId }, data: { blocked: newBlocked } });
       const action = user.blocked ? "blocked" : "unblocked";
       await prisma.notification.create({ data: { userId, title: `Account ${action.charAt(0).toUpperCase() + action.slice(1)}`, message: user.blocked ? `Your account has been blocked. You can no longer access the platform.` : `Your account has been unblocked. You can now access the platform.` } }).catch(() => {});
       return NextResponse.json({ success: true, blocked: user.blocked });

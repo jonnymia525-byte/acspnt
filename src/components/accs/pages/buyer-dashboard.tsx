@@ -4,15 +4,17 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useStore } from "@/store";
 import { money } from "@/lib/money";
+import { ProfileSettings } from "../widgets/profile-settings";
 
 
 interface Data {
-  user: { id: string; username: string; name: string; role: string; balance: number; twoFaEnabled: boolean };
+  user: { id: string; username: string; name: string; email: string; role: string; balance: number; twoFaEnabled: boolean };
   stats: { balance: number; orders: number; units: number; spent: number; openDisputes: number };
   purchases: Array<{ id: string; quantity: number; total: number; accounts: string; status: string; createdAt: string; product: { title: string; platform: string } }>;
   disputes: Array<{ id: string; reason: string; status: string; resolution?: string; createdAt: string }>;
   notifications: Array<{ id: string; title: string; message: string; read: boolean; createdAt: string }>;
   deposits: Array<{ id: string; amount: number; method: string; status: string; createdAt: string }>;
+  loginHistory: Array<{ id: string; action: string; description: string; ip?: string; country?: string; city?: string; createdAt: string }>;
 }
 
 const TABS = [
@@ -21,17 +23,13 @@ const TABS = [
   { key: "deposits", label: "Deposits" },
   { key: "disputes", label: "Disputes" },
   { key: "notifications", label: "Notifications" },
+  { key: "login-history", label: "Login History" },
+  { key: "settings", label: "Settings" },
 ];
 
 export function BuyerDashboard() {
   const { setUser } = useStore();
-  const [tab, setTab] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      return params.get('tab') || 'overview';
-    }
-    return 'overview';
-  });
+  const [tab, setTab] = useState('overview');
   const [data, setData] = useState<Data | null>(null);
 
   const [reportId, setReportId] = useState<string | null>(null);
@@ -39,7 +37,7 @@ export function BuyerDashboard() {
 
   const refresh = () => fetch("/api/dashboard/buyer").then(r => r.json()).then(d => { if (d.user) { setData(d); setUser(d.user); } }).catch(() => {});
 
-  useEffect(() => { refresh(); }, [setUser]);
+  useEffect(() => { refresh(); }, []);
 
   if (!data) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f5f5f5" }}>Loading...</div>;
 
@@ -98,10 +96,10 @@ export function BuyerDashboard() {
             {tab === "overview" && (
               <>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 16 }}>
-                  {[{ l: "Balance", v: money(data.stats.balance), c: "#3ea136" }, { l: "Orders", v: data.stats.orders, c: "#333" }, { l: "Units", v: data.stats.units, c: "#333" }, { l: "Spent", v: money(data.stats.spent), c: "#333" }].map(s => (
-                    <div key={s.l} className="stat">
+                  {[{ l: "Balance", v: money(data.stats.balance), c: "#3ea136", tab: "deposits" }, { l: "Orders", v: data.stats.orders, c: "#333", tab: "purchases" }, { l: "Units", v: data.stats.units, c: "#333", tab: "purchases" }, { l: "Spent", v: money(data.stats.spent), c: "#333", tab: "purchases" }].map(s => (
+                    <div key={s.l} className="stat" onClick={() => setTab(s.tab)} style={{ cursor: "pointer" }}>
                       <div className="num" style={{ color: s.c }}>{s.v}</div>
-                      <div className="lbl">{s.l}</div>
+                      <div className="lbl" style={{ textDecoration: "underline", color: "#1a73e8" }}>{s.l} →</div>
                     </div>
                   ))}
                 </div>
@@ -229,6 +227,40 @@ export function BuyerDashboard() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* LOGIN HISTORY */}
+            {tab === "login-history" && (
+              <div className="panel">
+                <div className="panel-head">Login History</div>
+                {!data.loginHistory || data.loginHistory.length === 0 ? (
+                  <div style={{ padding: 20, color: "#888", fontSize: 13, textAlign: "center" }}>No login history</div>
+                ) : (
+                  data.loginHistory.map(l => (
+                    <div key={l.id} className="row" style={{ padding: '10px 16px' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>
+                          {l.description}
+                          {l.action === "security" && <span style={{ color: '#e53e3e', marginLeft: 6, fontSize: 11, fontWeight: 700 }}>⚠️ UNUSUAL</span>}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#888" }}>
+                          {l.ip && `IP: ${l.ip}`}
+                          {l.country && ` · ${l.country}`}
+                          {l.city && `, ${l.city}`}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 10, color: "#aaa" }}>{new Date(l.createdAt).toLocaleString()}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {tab === "settings" && (
+              <div className="panel">
+                <div className="panel-head">Profile Settings</div>
+                <ProfileSettings user={data.user} onUpdate={(u) => setData(d => d ? { ...d, user: { ...d.user, ...u } } : d)} />
               </div>
             )}
         </div>

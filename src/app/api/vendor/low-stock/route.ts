@@ -7,7 +7,7 @@ async function requireVendor() {
   const userId = cookieStore.get("accsm_user_id")?.value;
   if (!userId) return null;
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user || (user.role !== "vendor" && user.vendorStatus !== "approved")) return null;
+  if (!user || user.role !== "vendor" || user.vendorStatus !== "approved") return null;
   return user;
 }
 

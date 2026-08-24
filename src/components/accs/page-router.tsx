@@ -13,14 +13,17 @@ import { RulesPage } from "./pages/rules-page";
 import { SupportPage } from "./pages/support-page";
 import { SellerTermsPage } from "./pages/seller-terms-page";
 import { USDTDeposit } from "./widgets/usdt-deposit";
+import { ForgotPasswordPage } from "./pages/forgot-password-page";
+import { ResetPasswordPage } from "./pages/reset-password-page";
 
 export function PageRouter({ children }: { children: React.ReactNode }) {
-  const [page, setPage] = useState<string | null>(() => {
-    if (typeof window !== "undefined") {
-      return new URLSearchParams(window.location.search).get("page");
-    }
-    return null;
-  });
+  const [page, setPage] = useState<string | null>(null);
+
+  // Read URL after hydration to avoid SSR/client mismatch (React #418)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setPage(params.get("page"));
+  }, []);
   const { user } = useStore();
 
   useEffect(() => {
@@ -76,6 +79,11 @@ export function PageRouter({ children }: { children: React.ReactNode }) {
     case "support": return <SupportPage />;
     case "seller-terms": return <SellerTermsPage />;
     case "deposit": return <USDTDeposit />;
+    case "forgot-password": return <ForgotPasswordPage />;
+    case "reset-password": {
+      const token = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('token') || '' : '';
+      return token ? <ResetPasswordPage token={token} /> : <ForgotPasswordPage />;
+    }
     default: return <>{children}</>;
   }
 }

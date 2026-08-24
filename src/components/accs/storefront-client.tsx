@@ -11,6 +11,8 @@ import { money } from "@/lib/money";
 import { BuyModal } from "./widgets/buy-modal";
 import { ChatWidget } from "./widgets/chat-widget";
 import { ChatSupport } from "./widgets/chat-support";
+import { NoticeBar } from "@/components/accs/widgets/notice-bar";
+import { toast, Toaster } from "@/components/accs/widgets/toast";
 
 
 interface Vendor { id: string; username: string; vendorCountry?: string; vendorStatus?: string; }
@@ -150,6 +152,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
   const [showCat, setShowCat] = useState(false);
   const [buyListing, setBuyListing] = useState<Listing | null>(null);
   const [langOpen, setLangOpen] = useState(false);
+  const [visibilityOverride, setVisibilityOverride] = useState<Record<string, boolean>>({});
 
   const [expandedPlatforms, setExpandedPlatforms] = useState<Record<string, boolean>>({});
   const [detailListing, setDetailListing] = useState<Listing | null>(null);
@@ -238,7 +241,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
 
       setNotifSections(mergedSections);
       setNotifGrouped(mergedGrouped);
-      setNotifTotal(mergedSections.reduce((sum, s) => sum + s.count, 0));
+      setNotifTotal(dbSections.reduce((sum, s) => sum + s.count, 0));
     } catch {}
     setLoadingNotifs(false);
   };
@@ -328,7 +331,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
         <Link href="/?page=login" className="btn-login">Login</Link></>}
         {user && <>
           <div style={{ position: "relative", display: "inline-flex" }}>
-            <a href={dashUrl(user.role)} onClick={e => { e.preventDefault(); if (notifTotal > 0) setShowNotifDrop(!showNotifDrop); else window.location.href = dashUrl(user.role); }} style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#3ea136", borderRadius: 3, textDecoration: "none", fontWeight: 600, display: "inline-flex", alignItems: "center", cursor: "pointer" }}>Dashboard{notifTotal > 0 && <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>{notifTotal}</span>}</a>
+            <a href={dashUrl(user.role)} onClick={e => { e.preventDefault(); window.location.href = dashUrl(user.role); }} style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#3ea136", borderRadius: 3, textDecoration: "none", fontWeight: 600, display: "inline-flex", alignItems: "center", cursor: "pointer" }}>Dashboard{notifTotal > 0 && <span onClick={e => { e.stopPropagation(); e.preventDefault(); setShowNotifDrop(v => !v); }} style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4, cursor: "pointer" }}>{notifTotal}</span>}</a>
             {showNotifDrop && (
               <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: "#fff", border: "1px solid #ddd", borderRadius: 8, padding: 0, minWidth: 320, maxWidth: 380, zIndex: 100, boxShadow: "0 4px 16px rgba(0,0,0,0.15)", maxHeight: 420, overflowY: "auto" }}>
                 {/* Header */}
@@ -429,6 +432,8 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
         <button onClick={toggleTheme} style={{ fontSize: 11 }}>{theme === "dark" ? "Light" : "Dark"}</button>
       </div>
 
+      <NoticeBar />
+
       {/* NAV BAR */}
       <div className="navbar">
         <Link href="/?page=support" className="nav-newticket">New ticket / Ask a question</Link>
@@ -436,7 +441,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
         <Link href="/?page=faq">FAQ</Link>
         <Link href="/?page=rules">Terms of use</Link>
         {!user && <Link href="/?page=seller-register" className="nav-seller">Become a seller</Link>}
-        {user && <a href={dashUrl(user.role)} onClick={e => { e.preventDefault(); if (notifTotal > 0) setShowNotifDrop(!showNotifDrop); else window.location.href = dashUrl(user.role); }} style={{ color: "#5fa830", fontWeight: 600, marginLeft: 8, position: "relative", display: "inline-flex", alignItems: "center", cursor: "pointer" }}>Dashboard{notifTotal > 0 && <span style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}>{notifTotal}</span>}</a>}
+        {user && <a href={dashUrl(user.role)} onClick={e => { e.preventDefault(); window.location.href = dashUrl(user.role); }} style={{ color: "#5fa830", fontWeight: 600, marginLeft: 8, position: "relative", display: "inline-flex", alignItems: "center", cursor: "pointer" }}>Dashboard{notifTotal > 0 && <span onClick={e => { e.stopPropagation(); e.preventDefault(); setShowNotifDrop(v => !v); }} style={{ background: "#e53e3e", color: "#fff", fontSize: 9, minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 4, cursor: "pointer" }}>{notifTotal}</span>}</a>}
       </div>
 
       {/* HEADER: Logo + Category + Search */}
@@ -513,7 +518,9 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
               <div style={{ width: 56, flexShrink: 0, textAlign: "center" }}></div>
             </div>
 
-            {visibleRows.map(({ listing, product }) => (
+            {visibleRows.map(({ listing, product }) => {
+              const isHidden = (visibilityOverride[listing.id] ?? listing.visible) === false;
+              return (
               <div key={product.id} className="product-row">
                 <ProductIcon platform={product.platform} />
                 <div className="product-info">
@@ -535,7 +542,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
                   {listing.category === "verified" && <span className="tag tag-star">★ Verified</span>}
                   {listing.category === "aged" && <span className="tag tag-star">★ Aged</span>}
                   {listing.bestSeller && <span className="tag tag-bestseller">🔥 Best Seller</span>}
-                  {listing.visible === false && <span className="tag" style={{ background: '#ff9800', color: '#fff', fontSize: 9 }}>HIDDEN</span>}
+                  {isHidden && <span className="tag" style={{ background: '#ff9800', color: '#fff', fontSize: 9 }}>HIDDEN</span>}
                 </div>
                 <div className="stock-col"><strong>{product.stock.toLocaleString()}</strong></div>
                 <div className="price-col"><span className="price-from">from </span>{money(product.storePrice)}</div>
@@ -545,20 +552,20 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
                       onClick={e => { e.stopPropagation(); setEditListing(listing); setEditTitle(listing.title); setEditDesc(listing.deliveryFormat || ''); setEditPrice(String(product.storePrice)); setEditStock(String(product.stock)); }}>
                       Edit
                     </button>
-                    <button className="buy-btn" style={{ background: listing.visible === false ? '#ff9800' : '#6c757d', padding: '6px 14px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 4 }}
+                    <button className="buy-btn" style={{ background: isHidden ? '#ff9800' : '#6c757d', padding: '6px 14px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 4 }}
                       onClick={e => {
                         e.stopPropagation();
                         fetch('/api/admin/listings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'toggle_visible', listingId: listing.id }) })
-                          .then(r => r.json()).then(r => { if (r.success) location.reload(); else alert(r.error || 'Failed'); });
+                          .then(r => r.json()).then(r => { if (r.success) { setVisibilityOverride(prev => ({ ...prev, [listing.id]: r.visible })); toast(r.visible ? "Listing shown" : "Listing hidden", "success"); } else toast(r.error || 'Failed', 'error'); });
                       }}>
-                      {listing.visible === false ? 'Show' : 'Hide'}
+                      {isHidden ? 'Unhide' : 'Hide'}
                     </button>
                     <button className="buy-btn" style={{ background: '#dc3545', padding: '6px 14px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 4 }}
                       onClick={e => {
                         e.stopPropagation();
                         if (confirm(`Delete listing "${listing.title}"? This will remove all products under it.`)) {
                           fetch('/api/admin/listings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete_listing', listingId: listing.id }) })
-                            .then(r => r.json()).then(r => { if (r.success) location.reload(); else alert(r.error || 'Failed'); });
+                            .then(r => r.json()).then(r => { if (r.success) { toast("Listing deleted", "success"); setTimeout(() => location.reload(), 600); } else toast(r.error || 'Failed', 'error'); });
                         }
                       }}>
                       Delete
@@ -577,7 +584,8 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
                   </button>
                 )}
               </div>
-            ))}
+              );
+            })}
 
             {hasMore && !expanded && (
               <div className="expand-btn"
@@ -594,7 +602,10 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
       })}
 
       {/* NO RESULTS */}
-      {filtered.length === 0 && (
+      {filtered.length === 0 && searchQuery && (
+        <div style={{ padding: 40, textAlign: "center", color: "#888", fontSize: 13 }}>No accounts match "{searchQuery}". Try a different search.</div>
+      )}
+      {filtered.length === 0 && !searchQuery && (
         <div style={{ textAlign: "center", padding: 40, color: "#888", fontSize: 13 }}>No results found</div>
       )}
 
@@ -665,8 +676,8 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
                   try {
                     const res = await fetch("/api/admin/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "edit", productId: editListing.products?.[0]?.id, title: editTitle, description: editDesc, vendorPrice: editPrice, stock: editStock }) });
                     const r = await res.json();
-                    if (r.success) { alert("Saved!"); setEditListing(null); location.reload(); } else alert(r.error || "Failed");
-                  } catch { alert("Error saving"); }
+                    if (r.success) { toast("Saved!", "success"); setEditListing(null); setTimeout(() => location.reload(), 600); } else toast(r.error || "Failed", "error");
+                  } catch { toast("Error saving", "error"); }
                 }}>Save</button>
               </div>
             </div>
@@ -784,8 +795,7 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
                 style={{ flex: 1, padding: "8px 0", border: "1px solid #ddd", borderRadius: 4, background: "#fff", cursor: "pointer", fontSize: 13 }}>Cancel</button>
               <button className="btn btn-primary" style={{ flex: 1 }}
                 onClick={() => {
-                  const info = `User: ${user ? `${user.name || user.username} (${user.email})` : "Guest"}\nProduct: ${contactListing.title}\nPlatform: ${contactListing.platform}\nCategory: ${contactListing.category}\nMessage: ${contactMsg || "No message"}`;
-                  alert("Message sent to admin!\n\n" + info);
+                  toast("Message sent to admin!", "success");
                   setContactListing(null); setContactMsg("");
                 }}>Send</button>
             </div>
@@ -796,6 +806,8 @@ export function StorefrontClient({ platforms, trending, totalListings, totalPlat
 
 
       <ChatWidget />
+
+      <Toaster />
     </>
   );
 }

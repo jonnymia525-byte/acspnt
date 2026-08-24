@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { calcStorePrice } from "@/lib/money";
+import { generateUniqueSku } from "@/lib/sku";
 
 export async function POST(req: Request) {
   try {
@@ -58,6 +59,7 @@ export async function POST(req: Request) {
 
     const product = await prisma.product.create({
       data: {
+        sku: await generateUniqueSku(),
         title,
         description,
         platform,

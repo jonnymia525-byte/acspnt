@@ -82,6 +82,16 @@ export async function GET(req: Request) {
     return NextResponse.json({ deposits });
   }
 
+  // Auto-expire pending deposits older than 24 hours
+  await prisma.deposit.updateMany({
+    where: {
+      userId,
+      status: "pending",
+      createdAt: { lt: new Date(Date.now() - 86400000) },
+    },
+    data: { status: "expired" },
+  });
+
   const deposits = await prisma.deposit.findMany({
     where: { userId },
     select: {
@@ -120,7 +130,7 @@ export async function POST(req: Request) {
 
     // ─── CREATE DEPOSIT ─────────────────────────────────────────────
     if (action === "create_deposit") {
-      const { amount, network } = body;
+      const { amount, network, forceNew } = body;
       const netConfig = USDT_NETWORKS[network];
 
       if (!netConfig) {
@@ -149,6 +159,32 @@ export async function POST(req: Request) {
           },
           { status: 400 }
         );
+      }
+
+      // Resume an existing pending deposit created within the last hour
+      if (!forceNew) {
+        const existing = await prisma.deposit.findFirst({
+          where: {
+            userId,
+            status: "pending",
+            createdAt: { gte: new Date(Date.now() - 3600000) },
+          },
+          orderBy: { createdAt: "desc" },
+        });
+        if (existing) {
+          const existingNet = USDT_NETWORKS[existing.network || "trc20"];
+          return NextResponse.json({
+            success: true,
+            resumed: true,
+            message: "You already have a pending deposit from the last hour. Resume it.",
+            depositId: existing.id,
+            exactAmount: existing.exactAmount ?? existing.amount,
+            network: existing.network,
+            walletAddress: existing.walletAddress,
+            explorer: existingNet?.explorer,
+            minConfirmations: existingNet?.confirmations,
+          });
+        }
       }
 
       const exactAmount = generateExactAmount(amount);
@@ -183,6 +219,37 @@ export async function POST(req: Request) {
         explorer: netConfig.explorer,
         minConfirmations: netConfig.confirmations,
       });
+    }
+
+    // ─── CANCEL DEPOSIT ────────────────────────────────────────────
+    if (action === "cancel_deposit") {
+      const { depositId } = body;
+      if (!depositId)
+        return NextResponse.json({ error: "depositId required" }, { status: 400 });
+      const deposit = await prisma.deposit.findUnique({
+        where: { id: depositId },
+      });
+      if (!deposit)
+        return NextResponse.json({ error: "Deposit not found" }, { status: 404 });
+      if (deposit.userId !== userId)
+        return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+      if (deposit.status !== "pending")
+        return NextResponse.json(
+          { error: "Only pending deposits can be cancelled" },
+          { status: 400 }
+        );
+      await prisma.deposit.update({
+        where: { id: depositId },
+        data: { status: "cancelled" },
+      });
+      await prisma.activityLog.create({
+        data: {
+          action: "deposit_cancelled",
+          description: `User cancelled ${deposit.exactAmount ?? deposit.amount} USDT deposit`,
+          userId,
+        },
+      });
+      return NextResponse.json({ success: true, message: "Deposit cancelled" });
     }
 
     // ─── VERIFY DEPOSIT (with real blockchain check) ────────────────
@@ -262,7 +329,13 @@ export async function POST(req: Request) {
           },
         });
         return NextResponse.json(
-          { success: false, error: verifyResult.reason },
+          {
+            success: false,
+            error: verifyResult.reason,
+            partial: verifyResult.partial,
+            actualAmount: verifyResult.actualAmount,
+            expectedAmount: verifyResult.expectedAmount,
+          },
           { status: 400 }
         );
       }
@@ -306,6 +379,39 @@ export async function POST(req: Request) {
       return NextResponse.json({ status: deposit.status, amount: deposit.amount, exactAmount: deposit.exactAmount, txHash: deposit.txHash, completedAt: deposit.completedAt });
     }
 
+    // Admin: verify a deposit on-chain (no auto-credit)
+    if (action === "admin_verify") {
+      const admin = await prisma.user.findUnique({ where: { id: userId } });
+      if (!admin || admin.role !== "admin")
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const { depositId } = body;
+      if (!depositId)
+        return NextResponse.json({ error: "depositId required" }, { status: 400 });
+      const deposit = await prisma.deposit.findUnique({
+        where: { id: depositId },
+      });
+      if (!deposit)
+        return NextResponse.json({ error: "Deposit not found" }, { status: 404 });
+      if (!deposit.txHash)
+        return NextResponse.json(
+          { error: "No transaction hash recorded for this deposit" },
+          { status: 400 }
+        );
+
+      const wallets = await getWalletAddresses();
+      const walletAddress = wallets[deposit.network || "trc20"];
+      if (!walletAddress)
+        return NextResponse.json({ error: "Wallet not configured" }, { status: 500 });
+
+      const result = await verifyDeposit(
+        deposit.network || "trc20",
+        deposit.txHash,
+        deposit.exactAmount || deposit.amount,
+        walletAddress
+      );
+      return NextResponse.json({ success: true, result });
+    }
+
     // Admin: approve a pending deposit
     if (action === "admin_approve") {
       const admin = await prisma.user.findUnique({ where: { id: userId } });
@@ -319,7 +425,7 @@ export async function POST(req: Request) {
       await prisma.$transaction([
         prisma.user.update({ where: { id: deposit.userId }, data: { balance: { increment: deposit.amount } } }),
         prisma.deposit.update({ where: { id: depositId }, data: { status: "completed", completedAt: new Date() } }),
-        prisma.activityLog.create({ data: { action: "deposit_completed", description: `Admin approved ${deposit.amount} USDT deposit for user ${deposit.userId}`, userId } }),
+        prisma.activityLog.create({ data: { action: "deposit_completed", description: `Admin ${admin.username} approved ${deposit.amount} USDT deposit for user ${deposit.userId}`, userId } }),
       ]);
       return NextResponse.json({ success: true, message: `Approved ${deposit.amount} USDT deposit` });
     }
@@ -341,7 +447,7 @@ export async function POST(req: Request) {
       { error: "Unknown action." },
       { status: 400 }
     );
-  } catch (err: any) {
+  } catch (err) {
     console.error("Deposit error:", err);
     return NextResponse.json({ error: "Deposit failed" }, { status: 500 });
   }

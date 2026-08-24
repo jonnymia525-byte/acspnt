@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 
@@ -33,6 +33,7 @@ export async function GET() {
     otherWithdrawals,
     allDeposits,
     pendingVendorRequests,
+    disputes,
   ] = await Promise.all([
     prisma.purchase.aggregate({ _count: { _all: true }, _sum: { total: true } }),
     prisma.user.count(),
@@ -88,6 +89,35 @@ export async function GET() {
       select: { id: true, firstName: true, lastName: true, email: true, productDetails: true, userId: true, user: { select: { username: true } } },
       orderBy: { createdAt: "desc" },
     }),
+    prisma.dispute.findMany({
+      select: {
+        id: true,
+        reason: true,
+        status: true,
+        resolution: true,
+        createdAt: true,
+        purchaseId: true,
+        refundAmount: true,
+        vendorCharge: true,
+        buyer: { select: { id: true, username: true, email: true } },
+        purchase: {
+          select: {
+            id: true,
+            quantity: true,
+            subtotal: true,
+            total: true,
+            accounts: true,
+            status: true,
+            createdAt: true,
+            product: {
+              select: { id: true, title: true, platform: true, storePrice: true, category: true, vendorId: true, vendor: { select: { id: true, username: true, email: true } } },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    }),
   ]);
 
   return NextResponse.json({
@@ -111,5 +141,6 @@ export async function GET() {
     allWithdrawals: [...pendingWithdrawals, ...otherWithdrawals],
     allDeposits,
     pendingVendorRequests,
+    allDisputes: disputes,
   });
 }

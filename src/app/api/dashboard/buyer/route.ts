@@ -14,7 +14,11 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (user.blocked) return NextResponse.json({ error: "Account blocked" }, { status: 403 });
 
+<<<<<<< ours
   const [purchaseAgg, purchases, disputes, notifications, openDisputes, deposits, loginHistory] = await Promise.all([
+=======
+  const [purchaseAgg, purchases, disputes, notifications, openDisputes, deposits, pendingDeposits] = await Promise.all([
+>>>>>>> theirs
     prisma.purchase.aggregate({
       where: { buyerId: userId },
       _count: { _all: true },
@@ -22,13 +26,21 @@ export async function GET() {
     }),
     prisma.purchase.findMany({
       where: { buyerId: userId },
-      select: { id: true, quantity: true, total: true, accounts: true, status: true, createdAt: true, product: { select: { title: true, platform: true } } },
+      select: { id: true, quantity: true, total: true, accounts: true, status: true, createdAt: true, product: { select: { title: true, platform: true, sku: true } } },
       orderBy: { createdAt: "desc" },
       take: 50,
     }),
     prisma.dispute.findMany({
       where: { buyerId: userId },
-      select: { id: true, reason: true, status: true, resolution: true, createdAt: true },
+      select: {
+        id: true,
+        reason: true,
+        status: true,
+        resolution: true,
+        refundAmount: true,
+        createdAt: true,
+        purchase: { select: { id: true, total: true, product: { select: { title: true, platform: true } } } },
+      },
       orderBy: { createdAt: "desc" },
     }),
     prisma.notification.findMany({
@@ -44,11 +56,17 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
       take: 50,
     }),
+<<<<<<< ours
     prisma.activityLog.findMany({
       where: { userId, action: { in: ["login", "security"] } },
       select: { id: true, action: true, description: true, ip: true, country: true, city: true, createdAt: true },
       orderBy: { createdAt: "desc" },
       take: 30,
+=======
+    prisma.deposit.aggregate({
+      where: { userId, status: "pending" },
+      _sum: { amount: true },
+>>>>>>> theirs
     }),
   ]);
 
@@ -65,6 +83,10 @@ export async function GET() {
     disputes,
     notifications,
     deposits,
+<<<<<<< ours
     loginHistory,
+=======
+    pendingDepositAmount: pendingDeposits._sum.amount || 0,
+>>>>>>> theirs
   });
 }

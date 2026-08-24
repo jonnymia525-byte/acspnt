@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache";
 
 async function requireAdmin() {
   const cookieStore = await cookies();
@@ -65,6 +66,75 @@ export async function POST(req: Request) {
   if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
+
+  // Delete a setting (admin only)
+  if (body.action === "delete_setting" || body.delete_setting === true) {
+    const key = body.key;
+    if (!key || typeof key !== "string") {
+      return NextResponse.json({ error: "Key required" }, { status: 400 });
+    }
+    await prisma.setting.deleteMany({ where: { key } });
+    await prisma.activityLog.create({
+      data: {
+        action: "setting_deleted",
+        description: `Admin deleted site setting: ${key}`,
+        userId: admin.id,
+      },
+    });
+    return NextResponse.json({ success: true });
+  }
+
+  if (body.action === "admin_functions") {
+    if (body.function === "clear_cache") {
+      revalidatePath("/");
+      return NextResponse.json({ success: true, message: "Cache clear requested" });
+    }
+
+    if (body.function === "system_status") {
+      const [
+        users,
+        vendors,
+        products,
+        pendingProducts,
+        pendingDeposits,
+        openDisputes,
+        pendingWithdrawals,
+        activeTickets,
+        totalSalesAgg,
+        totalBalanceAgg,
+      ] = await Promise.all([
+        prisma.user.count(),
+        prisma.user.count({ where: { role: "vendor" } }),
+        prisma.product.count({ where: { status: "approved" } }),
+        prisma.product.count({ where: { status: "pending" } }),
+        prisma.deposit.count({ where: { status: "pending" } }),
+        prisma.dispute.count({ where: { status: "open" } }),
+        prisma.withdrawal.count({ where: { status: "pending" } }),
+        prisma.chatSession.count({ where: { status: { in: ["open", "assigned"] } } }),
+        prisma.purchase.aggregate({ _sum: { total: true } }),
+        prisma.user.aggregate({ _sum: { balance: true } }),
+      ]);
+
+      return NextResponse.json({
+        success: true,
+        status: {
+          users,
+          vendors,
+          products,
+          pendingProducts,
+          pendingDeposits,
+          openDisputes,
+          pendingWithdrawals,
+          activeTickets,
+          totalSales: totalSalesAgg._sum.total ?? 0,
+          totalBalance: totalBalanceAgg._sum.balance ?? 0,
+        },
+      });
+    }
+
+    return NextResponse.json({ error: "Unknown function" }, { status: 400 });
+  }
+
   const { settings } = body;
 
   if (!settings || typeof settings !== "object") {

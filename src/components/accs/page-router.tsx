@@ -18,12 +18,15 @@ import { ResetPasswordPage } from "./pages/reset-password-page";
 
 export function PageRouter({ children }: { children: React.ReactNode }) {
   const [page, setPage] = useState<string | null>(null);
+<<<<<<< ours
 
   // Read URL after hydration to avoid SSR/client mismatch (React #418)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setPage(params.get("page"));
   }, []);
+=======
+>>>>>>> theirs
   const { user } = useStore();
 
   useEffect(() => {
@@ -31,6 +34,7 @@ export function PageRouter({ children }: { children: React.ReactNode }) {
       const params = new URLSearchParams(window.location.search);
       setPage(params.get("page"));
     };
+    sync();
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
@@ -76,6 +80,7 @@ export function PageRouter({ children }: { children: React.ReactNode }) {
     case "admin-dashboard": return <AdminDashboard />;
     case "faq": return <FAQPage />;
     case "rules": return <RulesPage />;
+    case "terms": return <RulesPage />;
     case "support": return <SupportPage />;
     case "seller-terms": return <SellerTermsPage />;
     case "deposit": return <USDTDeposit />;

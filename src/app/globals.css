@@ -273,7 +273,9 @@ a { color: inherit; text-decoration: none; }
 
 /* ===== PANEL ===== */
 .panel { background: #fff; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 12px; overflow: hidden; }
-.panel-head { background: #333; color: #fff; padding: 8px 14px; font-size: 13px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+.panel-head { background: #333; color: #fff; padding: 8px 14px; font-size: 13px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; gap: 4px 10px; flex-wrap: wrap; min-width: 0; }
+.panel-head > * { min-width: 0; }
+.panel-head .panel-head-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
 /* ===== ROW ===== */
 .row { display: flex; align-items: center; padding: 8px 14px; gap: 10px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
@@ -288,6 +290,15 @@ a { color: inherit; text-decoration: none; }
 /* ===== CHAT WIDGET ===== */
 .widget-bubble { position: fixed; bottom: 20px; right: 20px; z-index: 900; width: 44px; height: 44px; border-radius: 50%; background: #d32f2f; color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; font-weight: 700; border: 2px solid #fff; }
 .widget-panel { position: fixed; bottom: 76px; right: 20px; z-index: 900; width: 300px; border-radius: 6px; overflow: hidden; background: #fff; border: 1px solid #ddd; box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+
+/* ===== TOAST ===== */
+@keyframes toastIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ===== RESPONSIVE TABLES (dashboard) ===== */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+@media (max-width: 768px) {
+  .table-scroll { -webkit-overflow-scrolling: touch; }
+}
 
 /* ===== CHIPS ===== */
 .chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -379,6 +390,7 @@ html.dark .tag-bestseller { background: #3a3520; color: #e8a000; border-color: #
     padding: 6px 10px; font-size: 11px; flex-shrink: 0;
   }
   .side { flex-direction: row; overflow-x: auto; width: 100%; border-radius: 0; padding: 4px; }
+  .panel-head { padding: 8px 10px; font-size: 12px; }
   .cards { grid-template-columns: 1fr !important; }
   .footer-inner { flex-wrap: nowrap; gap: 16px; }
   .footer-left { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -388,8 +400,9 @@ html.dark .tag-bestseller { background: #3a3520; color: #e8a000; border-color: #
 }
 
 @media (max-width: 480px) {
-  .topbar { font-size: 11px; gap: 6px; padding: 4px 8px; }
+  .topbar { font-size: 11px; gap: 6px; padding: 4px 8px; flex-wrap: wrap; row-gap: 4px; }
   .topbar .btn-signup, .topbar .btn-login { padding: 3px 8px; font-size: 11px; }
+  .panel-head { font-size: 11px; padding: 7px 10px; }
   .header-main { padding: 6px 10px; gap: 6px; }
   .logo-accs { font-size: 14px; padding: 3px 6px; }
   .logo-text { font-size: 13px; }
@@ -407,3 +420,13 @@ html.dark .tag-bestseller { background: #3a3520; color: #e8a000; border-color: #
   .footer-left .footer-col { width: 100%; }
   .footer-contact { flex: 1; min-width: 0; }
 }
+
+/* ===== DASHBOARD DARK MODE ===== */
+html.dark .topbar { background: #1f1f1f; }
+html.dark .panel-head { background: #2a2a2a; }
+html.dark .tbl th { background: #2a2a2a; color: #aaa; border-color: #444; }
+html.dark .tbl td { border-color: #333; }
+html.dark .side { background: #222; border-color: #333; }
+html.dark .side-item { color: #aaa; }
+html.dark .side-item.on { background: #3ea136; color: #fff; }
+html.dark .badge { background: #333; color: #ccc; }

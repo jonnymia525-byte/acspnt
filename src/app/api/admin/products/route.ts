@@ -21,8 +21,14 @@ export async function GET(req: Request) {
 
   if (action === "list") {
     const status = url.searchParams.get("status") || undefined;
+    const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1);
+    const perPage = Math.min(200, Math.max(1, parseInt(url.searchParams.get("perPage") || "100", 10) || 100));
+
+    const where = status ? { status } : {};
+    const total = await prisma.product.count({ where });
+
     const products = await prisma.product.findMany({
-      where: status ? { status } : {},
+      where,
       select: {
         id: true, title: true, description: true, platform: true, category: true,
         vendorPrice: true, storePrice: true, stock: true, status: true,
@@ -31,7 +37,8 @@ export async function GET(req: Request) {
         vendor: { select: { id: true, username: true, name: true, vendorStatus: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 200,
+      skip: (page - 1) * perPage,
+      take: perPage,
     });
     // Check for duplicates: same title + vendor
     const titleVendorMap = new Map<string, number>();
@@ -43,7 +50,7 @@ export async function GET(req: Request) {
       ...p,
       isDuplicate: (titleVendorMap.get(`${p.title}::${p.vendor.id}`) || 0) > 1,
     }));
-    return NextResponse.json({ products: productsWithMeta });
+    return NextResponse.json({ products: productsWithMeta, total, page, perPage, totalPages: Math.ceil(total / perPage) });
   }
 
   if (action === "detail") {
@@ -71,7 +78,54 @@ export async function POST(req: Request) {
   if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
-  const { action, productId, ...data } = body;
+  const { action, productId, ids, ...data } = body;
+
+  const batchActions = ["batch_approve", "batch_delete", "batch_reject"];
+
+  if (batchActions.includes(action)) {
+    const idList = Array.isArray(ids) ? ids.map(String).filter(Boolean) : [];
+    if (idList.length === 0) return NextResponse.json({ error: "ids required" }, { status: 400 });
+
+    switch (action) {
+      case "batch_approve": {
+        const result = await prisma.product.updateMany({
+          where: { id: { in: idList } },
+          data: { status: "approved", visible: true },
+        });
+        await prisma.activityLog.create({ data: { action: "products_batch_approved", description: `Admin approved ${result.count} products`, userId: admin.id } });
+        return NextResponse.json({ success: true, count: result.count });
+      }
+
+      case "batch_delete": {
+        const toDelete = await prisma.product.findMany({ where: { id: { in: idList } }, select: { id: true, title: true, vendorId: true } });
+        const result = await prisma.product.updateMany({
+          where: { id: { in: idList } },
+          data: { deletedAt: new Date(), visible: false, status: "deleted" },
+        });
+        for (const p of toDelete) {
+          await prisma.notification.create({ data: { userId: p.vendorId, title: "Product Removed", message: `Your product "${p.title}" has been removed by admin.`, section: 'products' } });
+        }
+        await prisma.activityLog.create({ data: { action: "products_batch_deleted", description: `Admin deleted ${result.count} products`, userId: admin.id } });
+        return NextResponse.json({ success: true, count: result.count });
+      }
+
+      case "batch_reject": {
+        const reason = data.reason !== undefined ? String(data.reason) : "";
+        const toReject = await prisma.product.findMany({ where: { id: { in: idList } }, select: { id: true, title: true, vendorId: true } });
+        const result = await prisma.product.updateMany({
+          where: { id: { in: idList } },
+          data: { status: "rejected", visible: false },
+        });
+        if (reason) {
+          for (const p of toReject) {
+            await prisma.notification.create({ data: { userId: p.vendorId, title: "Product Rejected", message: `Your product "${p.title}" was rejected. Reason: ${reason}`, section: 'products' } });
+          }
+        }
+        await prisma.activityLog.create({ data: { action: "products_batch_rejected", description: `Admin rejected ${result.count} products${reason ? `: ${reason}` : ""}`, userId: admin.id } });
+        return NextResponse.json({ success: true, count: result.count });
+      }
+    }
+  }
 
   if (!productId) return NextResponse.json({ error: "productId required" }, { status: 400 });
 

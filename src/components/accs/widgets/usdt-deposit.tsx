@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useStore } from "@/store";
+import { toast } from "@/components/accs/widgets/toast";
 
 const NETWORKS = [
   { id: "trc20", label: "TRC20 (TRON)", color: "#FF0013", minDeposit: 5 },
@@ -13,6 +14,7 @@ const NETWORKS = [
 interface DepositResult {
   depositId: string;
   exactAmount: number;
+  amount?: number;
   network: string;
   networkLabel: string;
   walletAddress: string;
@@ -25,7 +27,16 @@ export function USDTDeposit() {
   const { user } = useStore();
   const [step, setStep] = useState<"select" | "payment" | "verify" | "done">("select");
   const [selectedNetwork, setSelectedNetwork] = useState("");
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem("accsm_deposit_amount");
+      if (stored) {
+        localStorage.removeItem("accsm_deposit_amount");
+        return stored;
+      }
+    }
+    return "";
+  });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<DepositResult | null>(null);
   const [txHash, setTxHash] = useState("");
@@ -61,14 +72,19 @@ export function USDTDeposit() {
         body: JSON.stringify({ action: "create_deposit", amount: amt, network: selectedNetwork }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.resumed) {
+        setResult(data);
+        setStep("payment");
+        setErrMsg("");
+        toast("Resumed your pending deposit from the last hour", "info");
+      } else if (data.success) {
         setResult(data);
         setStep("payment");
         setErrMsg("");
       } else {
         setErrMsg(data.error || "Failed to create deposit");
       }
-    } catch { setErrMsg("Network error. Please try again."); }
+    } catch { toast("Network error. Please try again.", "error"); }
     setLoading(false);
   };
 
@@ -95,7 +111,7 @@ export function USDTDeposit() {
         setVerifyMsg(data.error || "Verification failed. Please check your transaction details.");
       }
     } catch {
-      setVerifyMsg("Network error. Please try again.");
+      toast("Network error. Please try again.", "error");
     }
     setVerifyLoading(false);
   };
@@ -132,6 +148,11 @@ export function USDTDeposit() {
         {/* STEP 1: Select network + amount */}
         {step === "select" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {history.some((d: any) => d.status === "pending") && (
+              <div style={{ background: "#fff3cd", color: "#856404", fontSize: 12, padding: 10, borderRadius: 6, marginBottom: 12 }}>
+                ⏳ You have a pending deposit. Send the payment or cancel it below. You can start a new deposit after it completes.
+              </div>
+            )}
             {/* Network */}
             <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#555" }}>Network</label>
@@ -159,11 +180,14 @@ export function USDTDeposit() {
                     value={amount}
                     onChange={e => setAmount(e.target.value)}
                     placeholder={network ? `${network.minDeposit}.00` : "0.00"}
-                    style={{ width: "100%", padding: "10px 60px 10px 12px", borderRadius: 6, border: "1px solid #ddd", fontSize: 16, fontWeight: 600, boxSizing: "border-box" }}
+                    style={{ width: "100%", padding: "10px 60px 10px 12px", borderRadius: 6, border: "1px solid #ddd", borderColor: network && amount && parseFloat(amount) < network.minDeposit ? "#e53e3e" : "#ddd", fontSize: 16, fontWeight: 600, boxSizing: "border-box" }}
                   />
                   <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 13, color: "#888" }}>USDT</span>
                 </div>
                 {network && <p style={{ fontSize: 11, color: "#888", marginTop: 4 }}>Minimum: {network.minDeposit} USDT</p>}
+                {network && amount && parseFloat(amount) < network.minDeposit && (
+                  <p style={{ fontSize: 11, color: "#e53e3e", marginTop: 4 }}>Minimum deposit is {network.minDeposit} USDT</p>
+                )}
               </div>
             )}
 
@@ -212,7 +236,7 @@ export function USDTDeposit() {
 
             {/* Warning */}
             <div style={{ fontSize: 12, color: "#d32f2f", fontWeight: 700, background: "#fff3e0", padding: 10, borderRadius: 6, lineHeight: 1.5 }}>
-              Send the exact amount shown above
+              ⚠️ Send EXACTLY <strong>{result.exactAmount}</strong> USDT — not {result.amount}. Sending a different amount (like {result.amount}.00) will fail blockchain verification.
             </div>
 
             {/* QR */}
@@ -298,9 +322,11 @@ export function USDTDeposit() {
               </div>
             )}
             {verifyLoading && (
-              <div style={{ fontSize: 12, color: "#1976d2", padding: 10, borderRadius: 6, background: "#e3f2fd", display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ display: "inline-block", width: 16, height: 16, border: "2px solid #1976d2", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-                Verifying on blockchain... This may take a moment.
+              <div style={{ fontSize: 12, color: "#1976d2", padding: 10, borderRadius: 6, background: "#e3f2fd" }}>
+                <div>⏳ Checking transaction hash...</div>
+                <div style={{ marginTop: 2 }}>🔍 Scanning {result.networkLabel} for the transfer...</div>
+                <div style={{ marginTop: 2 }}>✅ Verifying amount matches expected...</div>
+                <div style={{ marginTop: 2, color: "#888" }}>This may take up to 30 seconds.</div>
               </div>
             )}
 
@@ -360,11 +386,16 @@ export function USDTDeposit() {
                     <span style={{ fontSize: 13, fontWeight: 600 }}>{d.exactAmount || d.amount} USDT</span>
                     <span style={{ fontSize: 11, color: "#888", marginLeft: 8 }}>{d.network?.toUpperCase() || d.method}</span>
                   </div>
-                  <span style={{
-                    fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 10, textTransform: "capitalize",
-                    background: d.status === "completed" ? "#e8f5e9" : d.status === "verifying" ? "#fff3e0" : d.status === "rejected" ? "#fce4ec" : "#f5f5f5",
-                    color: d.status === "completed" ? "#3ea136" : d.status === "verifying" ? "#ff9800" : d.status === "rejected" ? "#e53e3e" : "#888",
-                  }}>{d.status}</span>
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    <span style={{
+                      fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 10, textTransform: "capitalize",
+                      background: d.status === "completed" ? "#e8f5e9" : d.status === "verifying" ? "#fff3e0" : d.status === "rejected" ? "#fce4ec" : "#f5f5f5",
+                      color: d.status === "completed" ? "#3ea136" : d.status === "verifying" ? "#ff9800" : d.status === "rejected" ? "#e53e3e" : "#888",
+                    }}>{d.status}</span>
+                    {d.status === "pending" && (
+                      <button onClick={async () => { if (!confirm("Cancel this deposit?")) return; const res = await fetch("/api/deposits", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel_deposit", depositId: d.id }) }); const r = await res.json(); if (r.success) { toast("Deposit cancelled", "success"); fetch("/api/deposits").then(r => r.json()).then(x => setHistory(x.deposits || [])); } else toast(r.error || "Failed", "error"); }} style={{ background: "#dc3545", color: "#fff", border: "none", borderRadius: 4, padding: "3px 8px", fontSize: 10, cursor: "pointer", marginLeft: 8 }}>Cancel</button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

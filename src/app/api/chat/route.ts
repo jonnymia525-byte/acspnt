@@ -65,7 +65,7 @@ export async function POST(req: Request) {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { action, sessionId, subject, category, priority, message } = body;
+  const { action, sessionId, subject, category, priority, message, relatedType, relatedId } = body;
 
   if (action === "create_session") {
     if (!subject?.trim() || !message?.trim()) {
@@ -81,8 +81,17 @@ export async function POST(req: Request) {
     if (recentTickets >= 5) {
       return NextResponse.json({ error: "Too many tickets. Please wait before creating another." }, { status: 429 });
     }
+    const validRelatedTypes = ["order", "product", "dispute", "deposit", "withdrawal", "other"];
+    const resolvedRelatedType = validRelatedTypes.includes(relatedType) ? relatedType : "other";
     const session = await prisma.chatSession.create({
-      data: { subject: subject.trim(), category: category || "general", priority: priority || "normal", userId },
+      data: {
+        subject: subject.trim(),
+        category: category || "general",
+        priority: priority || "normal",
+        userId,
+        relatedType: resolvedRelatedType,
+        relatedId: relatedId || null,
+      },
     });
     await prisma.chatMessage.create({
       data: { sessionId: session.id, senderId: userId, message: message.trim(), isAdmin: false },
@@ -90,6 +99,22 @@ export async function POST(req: Request) {
     await prisma.activityLog.create({
       data: { action: "support_ticket_created", description: `User created support ticket: ${subject}`, userId },
     });
+    const requester = await prisma.user.findUnique({ where: { id: userId } });
+    const staff = await prisma.user.findMany({
+      where: { role: { in: ["admin", "moderator"] } },
+      select: { id: true },
+    });
+    if (requester && staff.length) {
+      await prisma.notification.createMany({
+        data: staff.map(s => ({
+          title: "New Support Ticket",
+          message: `New ticket: ${session.subject} from @${requester.username}`,
+          type: "info",
+          section: "support",
+          userId: s.id,
+        })),
+      });
+    }
     return NextResponse.json({ success: true, session });
   }
 
@@ -119,7 +144,47 @@ export async function POST(req: Request) {
       updateData.status = "open";
     }
     await prisma.chatSession.update({ where: { id: sessionId }, data: updateData });
+    if (!isAdmin) {
+      const staff = await prisma.user.findMany({
+        where: { role: { in: ["admin", "moderator"] } },
+        select: { id: true },
+      });
+      if (staff.length) {
+        await prisma.notification.createMany({
+          data: staff.map(s => ({
+            title: "New support message",
+            message: `@${user?.username ?? "user"} replied in ${session.subject}`,
+            type: "info",
+            section: "support",
+            userId: s.id,
+          })),
+        });
+      }
+    }
     return NextResponse.json({ success: true, message: msg });
+  }
+
+  if (action === "typing") {
+    if (!sessionId) return NextResponse.json({ error: "sessionId required" }, { status: 400 });
+    const session = await prisma.chatSession.findUnique({ where: { id: sessionId } });
+    if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    await prisma.chatSession.update({ where: { id: sessionId }, data: { typingAt: new Date() } });
+    return NextResponse.json({ success: true });
+  }
+
+  if (action === "rate_session") {
+    const rating = Number(body.rating);
+    if (!sessionId || !Number.isInteger(rating) || rating < 1 || rating > 5) {
+      return NextResponse.json({ error: "sessionId and rating (1-5) required" }, { status: 400 });
+    }
+    const session = await prisma.chatSession.findUnique({ where: { id: sessionId } });
+    if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    if (session.userId !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    await prisma.chatSession.update({
+      where: { id: sessionId },
+      data: { rating, ratingComment: body.comment || null },
+    });
+    return NextResponse.json({ success: true });
   }
 
   if (action === "close_session") {

@@ -46,6 +46,9 @@ model User {
   vendorSalesCount Int      @default(0)
   vendorResponseTime Float?
   vendorFulfillmentRate Float @default(100)
+  emailVerified Boolean  @default(false)
+  googleId      String?  @unique
+  country       String?
 
   ownedListings     Listing[]
   ownedProducts     Product[]
@@ -111,6 +114,7 @@ model Listing {
 model Product {
   id              String    @id @default(cuid())
   title           String
+  sku             String?   @unique
   description     String    @default("")
   platform        String
   category        String    @default("")
@@ -180,6 +184,7 @@ model Purchase {
   buyer        User      @relation(fields: [buyerId], references: [id])
   productId    String
   product      Product   @relation(fields: [productId], references: [id])
+  disputes     Dispute[]
 
   @@index([buyerId])
   @@index([productId])
@@ -216,10 +221,13 @@ model Dispute {
   evidenceUrls String? // JSON array of evidence file URLs
   slaDeadline DateTime?
   adminNote   String?
+  refundAmount Float?   @default(0)
+  vendorCharge Float?   @default(0)
 
   buyerId     String
   buyer       User     @relation(fields: [buyerId], references: [id])
   purchaseId  String?
+  purchase    Purchase? @relation(fields: [purchaseId], references: [id])
   vendorId    String?
   productId   String?
   orderId     String?
@@ -535,6 +543,8 @@ model ScheduledAnnouncement {
   startsAt  DateTime?
   expiresAt DateTime?
   deletedAt DateTime?
+  closeable        Boolean @default(true)
+  hiddenForUserIds String?
   createdAt DateTime @default(now())
 
   @@index([active])
@@ -592,6 +602,12 @@ model ChatSession {
   assignee    User?         @relation("ChatAssignee", fields: [assignedTo], references: [id])
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
+  relatedType String?
+  relatedId   String?
+  typingAt    DateTime?
+  slaDeadline DateTime?
+  rating      Int?
+  ratingComment String?
   messages    ChatMessage[]
 
   @@index([userId])
@@ -606,6 +622,7 @@ model ChatMessage {
   senderId    String
   sender      User        @relation("ChatSender", fields: [senderId], references: [id])
   message     String
+  attachment  String?
   isAdmin     Boolean     @default(false)
   read        Boolean     @default(false)
   createdAt   DateTime    @default(now())
@@ -614,6 +631,10 @@ model ChatMessage {
   @@index([senderId])
 }
 
+<<<<<<< ours
+=======
+
+>>>>>>> theirs
 model PasswordReset {
   id        String   @id @default(cuid())
   userId    String   @unique

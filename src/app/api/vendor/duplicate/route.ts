@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
+import { generateUniqueSku } from "@/lib/sku";
 
 async function requireVendor() {
   const cookieStore = await cookies();
@@ -25,8 +26,9 @@ export async function POST(req: Request) {
   }
 
   const duplicate = await prisma.product.create({
-    data: {
-      title: `${product.title} (Copy)`,
+data: {
+        sku: await generateUniqueSku(),
+        title: `${product.title} (Copy)`,
       description: product.description,
       platform: product.platform,
       category: product.category,

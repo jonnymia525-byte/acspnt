@@ -2,6 +2,7 @@
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { calcStorePrice } from "@/lib/money";
+import { generateUniqueSku } from "@/lib/sku";
 
 export async function GET() {
   const cookieStore = await cookies();
@@ -72,6 +73,9 @@ export async function POST(req: Request) {
 
     const stock = accounts.length;
 
+    const rawSku = body.sku !== undefined && body.sku !== null ? String(body.sku).trim() : "";
+    const sku = rawSku || (await generateUniqueSku());
+
     const listing = await prisma.listing.create({
       data: {
         title,
@@ -94,6 +98,7 @@ export async function POST(req: Request) {
         description,
         platform,
         category,
+        sku,
         vendorPrice,
         storePrice: calcStorePrice(vendorPrice),
         stock,

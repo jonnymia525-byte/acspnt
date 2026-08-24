@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
+import { generateUniqueSku } from "@/lib/sku";
 
 // POST - vendor claims an existing product (adds to their store)
 export async function POST(req: Request) {
@@ -45,6 +46,7 @@ export async function POST(req: Request) {
     // Create a new product listing for this vendor, linked to the parent
     const newProduct = await prisma.product.create({
       data: {
+        sku: await generateUniqueSku(),
         title: existingProduct.title,
         description: existingProduct.description,
         platform: existingProduct.platform,
@@ -66,7 +68,7 @@ export async function POST(req: Request) {
 
     // Create a listing too
     const listing = await prisma.listing.create({
-      data: {
+data: {
         title: existingProduct.title,
         platform: existingProduct.platform,
         category: existingProduct.category,

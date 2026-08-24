@@ -116,12 +116,13 @@ export async function POST(req: Request) {
         const product = await prisma.product.findUnique({ where: { id: productId }, include: { vendor: true } });
         if (!product) return NextResponse.json({ error: "Product not found" }, { status: 404 });
 
+        const reasonText = reason ? `: ${reason}` : "";
         await prisma.product.update({ where: { id: product.id }, data: { status: "rejected" } });
         await prisma.activityLog.create({
-          data: { action: "product_rejected", description: `Product ${product.title} rejected`, userId: admin.id },
+          data: { action: "product_rejected", description: `Product ${product.title} rejected${reasonText}`, userId: admin.id },
         });
         await prisma.notification.create({
-          data: { title: "Product rejected", message: `${product.title} was rejected: ${reason}`, type: "error", userId: product.vendorId },
+          data: { title: "Product rejected", message: `${product.title} was rejected${reasonText}`, type: "error", userId: product.vendorId },
         });
         try {
           await sendEmail({
@@ -138,6 +139,7 @@ export async function POST(req: Request) {
       case "topup": {
         const targetId = String(body.userId ?? "");
         const amount = Number(body.amount);
+        const reason = String(body.reason ?? "");
         if (!Number.isFinite(amount) || amount <= 0) {
           return NextResponse.json({ error: "Amount must be greater than 0" }, { status: 400 });
         }
@@ -147,6 +149,7 @@ export async function POST(req: Request) {
         const user = await prisma.user.findUnique({ where: { id: targetId } });
         if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
+<<<<<<< ours
         // Atomic transaction: update balance, create deposit record, create transaction record
         const updated = await prisma.$transaction(async (tx) => {
           const u = await tx.user.update({
@@ -160,6 +163,17 @@ export async function POST(req: Request) {
             data: { type: "topup", amount, description: "Admin manual top-up", userId: user.id },
           });
           return u;
+=======
+        const updated = await prisma.user.update({
+          where: { id: user.id },
+          data: { balance: { increment: amount } },
+        });
+        await prisma.deposit.create({
+          data: { amount, method: "manual", status: "completed", completedAt: new Date(), userId: user.id },
+        });
+        await prisma.transaction.create({
+          data: { type: "topup", amount, description: "Admin topup" + (reason ? `: ${reason}` : ""), userId: user.id },
+>>>>>>> theirs
         });
 
         await prisma.notification.create({
@@ -254,9 +268,16 @@ export async function POST(req: Request) {
         const disputeId = String(body.disputeId ?? "");
         const resolution = String(body.resolution ?? "");
         const refundBuyer = body.refundBuyer === true;
-        const dispute = await prisma.dispute.findUnique({ where: { id: disputeId }, include: { buyer: true } });
+        const dispute = await prisma.dispute.findUnique({
+          where: { id: disputeId },
+          include: {
+            buyer: true,
+            purchase: { include: { product: { include: { vendor: true } } } },
+          },
+        });
         if (!dispute) return NextResponse.json({ error: "Dispute not found" }, { status: 404 });
 
+<<<<<<< ours
         // CRITICAL: Only open disputes can be resolved (prevents replay refunds)
         if (dispute.status !== "open") {
           return NextResponse.json({ error: `Cannot resolve dispute with status "${dispute.status}"` }, { status: 400 });
@@ -280,14 +301,62 @@ export async function POST(req: Request) {
               });
             }
           }
+=======
+        let refundAmount = 0;
+        let vendorCharge = 0;
+
+        if (refundBuyer && dispute.purchase) {
+          const purchase = dispute.purchase;
+          refundAmount = purchase.total;
+          vendorCharge = purchase.vendorEarning || 0;
+
+          await prisma.$transaction([
+            // Refund buyer
+            prisma.user.update({
+              where: { id: dispute.buyerId },
+              data: { balance: { increment: refundAmount } },
+            }),
+            // Charge vendor (deduct their earnings)
+            prisma.user.update({
+              where: { id: purchase.product.vendorId },
+              data: { balance: { decrement: vendorCharge } },
+            }),
+            // Mark purchase refunded
+            prisma.purchase.update({
+              where: { id: purchase.id },
+              data: { status: "refunded" },
+            }),
+            // Buyer transaction
+            prisma.transaction.create({
+              data: { type: "dispute_refund", amount: refundAmount, description: "Dispute resolved refund", userId: dispute.buyerId },
+            }),
+            // Vendor transaction (negative = money taken back)
+            prisma.transaction.create({
+              data: { type: "dispute_charge", amount: -vendorCharge, description: "Dispute charge for sale", userId: purchase.product.vendorId },
+            }),
+          ]);
+        }
+
+        await prisma.dispute.update({
+          where: { id: dispute.id },
+          data: { status: "resolved", resolution, resolvedAt: new Date(), refundAmount, vendorCharge },
+>>>>>>> theirs
         });
 
         await prisma.activityLog.create({
-          data: { action: "dispute_resolved", description: `Dispute ${dispute.id} resolved`, userId: admin.id },
+          data: { action: "dispute_resolved", description: `Dispute ${dispute.id} resolved${refundBuyer ? ` - refunded ${refundAmount} & charged vendor ${vendorCharge}` : ""}`, userId: admin.id },
         });
         await prisma.notification.create({
           data: { title: "Dispute resolved", message: resolution, type: "success", userId: dispute.buyerId },
         });
+
+        // Notify vendor if they were charged
+        if (vendorCharge > 0 && dispute.purchase?.product.vendorId) {
+          await prisma.notification.create({
+            data: { title: "Dispute charge", message: `${vendorCharge.toFixed(2)} was deducted from your balance due to a resolved dispute.`, type: "error", section: "payouts", userId: dispute.purchase.product.vendorId },
+          });
+        }
+
         try {
           await sendEmail({
             to: dispute.buyer.email,
@@ -298,7 +367,7 @@ export async function POST(req: Request) {
         } catch (err) {
           console.error("Dispute resolution email failed:", err);
         }
-        return NextResponse.json({ success: true });
+        return NextResponse.json({ success: true, refundAmount, vendorCharge });
       }
       case "create_coupon": {
         const code = String(body.code ?? "").toUpperCase().trim();

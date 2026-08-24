@@ -5,6 +5,9 @@ import Link from "next/link";
 import { money } from "@/lib/money";
 import { platformLabel } from "@/lib/totp";
 import { AdminSettings as AdminSettingsWidget } from "@/components/accs/widgets/admin-settings";
+import { NoticeBar } from "@/components/accs/widgets/notice-bar";
+import { toast, Toaster } from "@/components/accs/widgets/toast";
+import { useStore } from "@/store";
 
 interface User {
   id: string; username: string; email: string; name: string; role: string;
@@ -53,8 +56,10 @@ interface UserDetail extends User {
   disputes: Array<{ id: string; reason: string; status: string; resolution: string | null; createdAt: string }>;
 }
 
-const TABS = ["overview", "users", "vendors", "products", "best-sellers", "orders", "withdrawals", "coupons", "deposits", "notices", "activity", "sales", "manage", "support-chat", "moderators", "recycle-bin", "settings"];
-const TAB_LABELS: Record<string, string> = { "overview": "Overview", "users": "Users", "vendors": "Vendors", "products": "Products", "best-sellers": "Best Sellers", "orders": "Orders", "withdrawals": "Withdrawals", "coupons": "Coupons", "deposits": "Deposits", "notices": "Notices", "activity": "Activity", "sales": "Sales", "manage": "Manage", "support-chat": "Support Chat", "moderators": "Moderators", "recycle-bin": "Recycle Bin", "settings": "Settings" };
+const TABS = ["overview", "users", "vendors", "products", "best-sellers", "orders", "withdrawals", "coupons", "deposits", "disputes", "notifications", "notices", "activity", "sales", "manage", "support-chat", "moderators", "recycle-bin", "settings"];
+const TAB_LABELS: Record<string, string> = { "overview": "Overview", "users": "Users", "vendors": "Vendors", "products": "Products", "best-sellers": "Best Sellers", "orders": "Orders", "withdrawals": "Withdrawals", "coupons": "Coupons", "deposits": "Deposits", "disputes": "Disputes", "notifications": "Notifications", "notices": "Notices", "activity": "Activity", "sales": "Sales", "manage": "Search", "support-chat": "Support Chat", "moderators": "Moderators", "recycle-bin": "Recycle Bin", "settings": "Settings" };
+
+const PRIORITY_WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
 
 interface ListingItem {
   id: string; title: string; platform: string; category: string;
@@ -165,6 +170,7 @@ function BestSellerManager({ loadAll }: { loadAll: () => void }) {
 }
 
 export function AdminDashboard() {
+  const { theme, toggleTheme } = useStore();
   const [tab, setTab] = useState(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -200,6 +206,7 @@ export function AdminDashboard() {
   // Topup
   const [topupUser, setTopupUser] = useState<User | null>(null);
   const [topupAmount, setTopupAmount] = useState("");
+  const [topupReason, setTopupReason] = useState("");
 
   // Message
   const [msgUser, setMsgUser] = useState<User | null>(null);
@@ -212,10 +219,20 @@ export function AdminDashboard() {
   const [noticeType, setNoticeType] = useState("info");
   const [noticeTarget, setNoticeTarget] = useState("all");
   const [noticeUserIds, setNoticeUserIds] = useState<string[]>([]);
+  const [noticeCloseable, setNoticeCloseable] = useState(true);
+  const [noticeActive, setNoticeActive] = useState(true);
+  const [allNotices, setAllNotices] = useState<any[]>([]);
+  const [editingNotice, setEditingNotice] = useState<any | null>(null);
+  const [hideNotice, setHideNotice] = useState<any | null>(null);
+  const [hideNoticeUserIds, setHideNoticeUserIds] = useState<Set<string>>(new Set());
+  const [noticeFormOpen, setNoticeFormOpen] = useState(true);
 
   // Reject product
   const [rejectProduct, setRejectProduct] = useState<Product | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+
+  // View product accounts
+  const [viewAccountsProduct, setViewAccountsProduct] = useState<any | null>(null);
 
   // Edit product
   const [editProduct, setEditProduct] = useState<Product | null>(null);
@@ -237,6 +254,13 @@ export function AdminDashboard() {
   const [editingLine, setEditingLine] = useState<{ productId: string; lineIndex: number } | null>(null);
   const [editingLineText, setEditingLineEdit] = useState("");
   const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set());
+
+  // Pending queue batch select + preview + reject all
+  const [pendingQueueSelected, setPendingQueueSelected] = useState<Set<string>>(new Set());
+  const [listSelected, setListSelected] = useState<Set<string>>(new Set());
+  const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
+  const [rejectAllOpen, setRejectAllOpen] = useState(false);
+  const [rejectAllReason, setRejectAllReason] = useState("");
 
   // Coupon form
   const [couponCode, setCouponCode] = useState("");
@@ -322,6 +346,7 @@ export function AdminDashboard() {
       setWithdrawals(dashRes.allWithdrawals || []);
       setVendorRequests(dashRes.pendingVendorRequests || []);
       setCoupons(dashRes.coupons || []);
+      setAllDisputes(dashRes.allDisputes || []);
       setUsers(usersRes.users || []);
       setProducts(productsRes.products || []);
     } catch {}
@@ -337,6 +362,12 @@ export function AdminDashboard() {
 
   // Deposits data
   const [allDeposits, setAllDeposits] = useState<any[]>([]);
+  const [depositVerify, setDepositVerify] = useState<Record<string, { ok: boolean; text: string }>>({});
+  // Disputes data
+  const [allDisputes, setAllDisputes] = useState<any[]>([]);
+  const [disputeResolution, setDisputeResolution] = useState<Record<string, string>>({});
+  const [disputeRefund, setDisputeRefund] = useState<Record<string, boolean>>({});
+  const [notifList, setNotifList] = useState<Array<{ id: string; title: string; message: string; section: string; createdAt: string }>>([]);
 
   // Support chat
   const [chatSessions, setChatSessions] = useState<any[]>([]);
@@ -344,13 +375,23 @@ export function AdminDashboard() {
   const [activeChatSession, setActiveChatSession] = useState<any>(null);
   const [activeChatMessages, setActiveChatMessages] = useState<any[]>([]);
   const [chatReplyMsg, setChatReplyMsg] = useState("");
+  const [chatSearch, setChatSearch] = useState("");
+  const [chatSort, setChatSort] = useState<"recent" | "priority">("recent");
+  const [adminUserId, setAdminUserId] = useState("");
   const [moderators, setModerators] = useState<any[]>([]);
   const [modUsername, setModUsername] = useState("");
   const [modEmail, setModEmail] = useState("");
   const [modPassword, setModPassword] = useState("");
   const [modName, setModName] = useState("");
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); loadNotices(); }, []);
+  useEffect(() => {
+    if (tab === "notifications") {
+      fetch("/api/notifications?markRead=all").then(r => r.json()).then(d => {
+        setNotifList(d.notifications || []);
+      }).catch(() => {});
+    }
+  }, [tab]);
   useEffect(() => { if (tab === "settings") fetchSettings(); }, [tab]);
   useEffect(() => { setSelectedUser(null); setSelectedProduct(null); setMgmtExpanded(null); }, [tab]);
 
@@ -396,6 +437,7 @@ export function AdminDashboard() {
     } catch {}
   };
   useEffect(() => { if (tab === "support-chat") fetchChatSessions(chatSessionFilter); }, [tab, chatSessionFilter]);
+  useEffect(() => { if (tab === "support-chat") setAdminUserId(useStore.getState().user?.id || ""); }, [tab]);
 
   const openChatSessionAdmin = async (sessionId: string) => {
     try {
@@ -521,7 +563,7 @@ export function AdminDashboard() {
   const doProductAction = async (action: string, productId: string, extra: any = {}) => {
     const res = await fetch("/api/admin/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, productId, ...extra }) });
     const r = await res.json();
-    if (r.success) { loadAll(); } else alert(r.error);
+    if (r.success) { loadAll(); } else toast(r.error || "Action failed", "error");
     return r;
   };
 
@@ -538,7 +580,7 @@ export function AdminDashboard() {
 
   const mergeProducts = async (title: string) => {
     const ids = mergeSelected[title] || [];
-    if (ids.length < 2) return alert("Select at least 2 products to merge");
+    if (ids.length < 2) return toast("Select at least 2 products to merge", "error");
     if (!confirm(`Merge ${ids.length} products under "${title}"? This groups them on the storefront.`)) return;
     try {
       const res = await fetch("/api/admin/products/merge", {
@@ -547,8 +589,8 @@ export function AdminDashboard() {
         body: JSON.stringify({ action: "merge", productIds: ids, masterTitle: title }),
       });
       const r = await res.json();
-      if (r.success) { alert(r.message); fetchMergeCandidates(); loadAll(); } else alert(r.error);
-    } catch { alert("Merge failed"); }
+      if (r.success) { toast(r.message, "success"); fetchMergeCandidates(); loadAll(); } else toast(r.error || "Merge failed", "error");
+    } catch { toast("Merge failed", "error"); }
   };
 
   const toggleMergeSelect = (title: string, productId: string) => {
@@ -586,10 +628,50 @@ export function AdminDashboard() {
   };
 
   const sendNotice = async () => {
-    if (!noticeTitle || !noticeBody) return alert("Title and message required");
-    const res = await fetch("/api/admin/notices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: noticeTitle, message: noticeBody, noticeType, target: noticeTarget, userIds: noticeUserIds }) });
+    if (!noticeTitle || !noticeBody) return toast("Title and message required", "error");
+    const res = await fetch("/api/admin/notices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: noticeTitle, message: noticeBody, noticeType, target: noticeTarget, userIds: noticeUserIds, closeable: noticeCloseable }) });
     const r = await res.json();
-    if (r.success) { alert("Notice sent!"); setNoticeTitle(""); setNoticeBody(""); loadAll(); } else alert(r.error);
+    if (r.success) { toast("Notice sent!", "success"); setNoticeTitle(""); setNoticeBody(""); setNoticeFormOpen(false); loadAll(); loadNotices(); } else toast(r.error || "Failed to send notice", "error");
+  };
+
+  const loadNotices = async () => {
+    try {
+      const res = await fetch("/api/admin/notices");
+      const r = await res.json();
+      setAllNotices(r.notices || []);
+    } catch {}
+  };
+
+  const saveNoticeEdit = async () => {
+    if (!editingNotice) return;
+    if (!noticeTitle || !noticeBody) return toast("Title and message required", "error");
+    const res = await fetch("/api/admin/notices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "update", noticeId: editingNotice.id, title: noticeTitle, message: noticeBody, noticeType, closeable: noticeCloseable, active: noticeActive }),
+    });
+    const r = await res.json();
+    if (r.success) { toast("Notice updated!", "success"); setEditingNotice(null); setNoticeTitle(""); setNoticeBody(""); loadNotices(); } else toast(r.error || "Failed to update notice", "error");
+  };
+
+  const deleteNotice = async (id: string) => {
+    if (!confirm("Delete this notice?")) return;
+    const res = await fetch("/api/admin/notices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", noticeId: id }),
+    });
+    if (res.ok) { loadNotices(); loadAll(); toast("Notice deleted", "success"); } else toast("Failed to delete notice", "error");
+  };
+
+  const saveHideUsers = async () => {
+    if (!hideNotice) return;
+    const res = await fetch("/api/admin/notices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set_hidden_users", noticeId: hideNotice.id, userIds: Array.from(hideNoticeUserIds) }),
+    });
+    if (res.ok) { setHideNotice(null); loadNotices(); toast("Hide settings saved", "success"); } else toast("Failed to hide users", "error");
   };
 
   const createCoupon = async () => {
@@ -603,13 +685,16 @@ export function AdminDashboard() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#f5f5f5" }}>
+      <Toaster />
       {/* Top Bar */}
       <div className="topbar">
         <div className="news-link"><span className="news-dot" /> News</div>
         <Link href="/" style={{ color: "#fff", fontSize: 12, padding: "4px 12px", background: "#3ea136", borderRadius: 3, textDecoration: "none", fontWeight: 600 }}>Store</Link>
         <span style={{ fontSize: 10, fontWeight: 700, background: "#e53e3e", color: "#fff", padding: "2px 6px", borderRadius: 4 }}>ADMIN</span>
+        <button onClick={toggleTheme} style={{ background: "none", border: "1px solid #555", color: "#bbb", borderRadius: 3, padding: "2px 8px", fontSize: 11, cursor: "pointer" }}>{theme === "dark" ? "☀️ Light" : "🌙 Dark"}</button>
         <Link href="/" style={{ color: "#aaa", fontSize: 11 }}>Logout</Link>
       </div>
+      <NoticeBar />
 
       {/* Nav Bar */}
       <div className="navbar">
@@ -650,12 +735,12 @@ export function AdminDashboard() {
                     { l: "Users", v: stats.totalUsers, c: "#333", tab: "users" },
                     { l: "Vendors", v: stats.totalVendors, c: "#333", tab: "vendors" },
                     { l: "Products", v: stats.totalProducts, c: "#333", tab: "products" },
-                    { l: "Live", v: stats.approvedProducts, c: "#3ea136", tab: "products" },
-                    { l: "Pending", v: stats.pendingProducts, c: "#eab308", tab: "products" },
+                    { l: "Live", v: stats.approvedProducts, c: "#3ea136", tab: "products", fn: () => { setProductFilter("approved"); setTab("products"); } },
+                    { l: "Pending", v: stats.pendingProducts, c: "#eab308", tab: "products", fn: () => { setProductFilter("pending"); setTab("products"); } },
                     { l: "Orders", v: stats.totalPurchases, c: "#333", tab: "orders" },
                     { l: "Revenue", v: money(stats.totalRevenue), c: "#3ea136", tab: "sales" },
-                    { l: "Open Disputes", v: stats.openDisputes, c: stats.openDisputes > 0 ? "#e53e3e" : "#333", tab: null },
-                  ].map(s => <div key={s.l} className="stat" style={{ cursor: s.tab ? "pointer" : "default" }} onClick={() => s.tab && setTab(s.tab)}><div className="num" style={{ color: s.c }}>{s.v}</div><div className="lbl">{s.l}</div></div>)}
+                    { l: "Open Disputes", v: stats.openDisputes, c: stats.openDisputes > 0 ? "#e53e3e" : "#333", tab: "disputes" },
+                  ].map(s => <div key={s.l} className="stat" style={{ cursor: s.tab ? "pointer" : "default" }} onClick={() => s.fn ? s.fn() : (s.tab && setTab(s.tab))}><div className="num" style={{ color: s.c }}>{s.v}</div><div className="lbl">{s.l}</div></div>)}
                 </div>
                 <div className="panel" style={{ marginBottom: 16 }}>
                   <div className="panel-head">Recent Activity</div>
@@ -705,7 +790,7 @@ export function AdminDashboard() {
             {/* User/Vendor Detail Panel */}
             {((tab === "users" || tab === "vendors") && selectedUser) && (
               <div>
-                <button onClick={() => { setSelectedUser(null); setDetailTab("overview"); }} className="btn btn-secondary btn-sm" style={{ marginBottom: 12 }}>&larr; Back</button>
+                <button onClick={() => { setSelectedUser(null); setDetailTab("overview"); }} className="btn btn-secondary btn-sm" style={{ marginBottom: 12 }}>&larr; Back to {tab === "vendors" ? "Vendors" : "Users"}</button>
                 <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                   <div className="panel" style={{ flex: 1, minWidth: 200, padding: 16 }}>
                     <div style={{ fontSize: 16, fontWeight: 700 }}>{selectedUser.name || selectedUser.username}</div>
@@ -723,7 +808,7 @@ export function AdminDashboard() {
                     </div>
                     <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button className="btn btn-primary btn-sm" onClick={() => { setEditUser(selectedUser); setEditName(selectedUser.name); setEditUsername(selectedUser.username); setEditEmail(selectedUser.email); setEditBalance(String(selectedUser.balance)); setEditRole(selectedUser.role); setEditPassword(""); }}>Edit User</button>
-                      <button className="btn btn-primary btn-sm" onClick={() => { setTopupUser(selectedUser); setTopupAmount(""); }}>Top-up Balance</button>
+                      <button className="btn btn-primary btn-sm" onClick={() => { setTopupUser(selectedUser); setTopupAmount(""); setTopupReason(""); }}>Top-up Balance</button>
                       <button className="btn btn-secondary btn-sm" onClick={() => { setMsgUser(selectedUser); setMsgTitle(""); setMsgBody(""); }}>Send Message</button>
                       {selectedUser.muted ? (
                         <button className="btn btn-secondary btn-sm" onClick={() => doUserAction("unmute", selectedUser.id)}>Unmute</button>
@@ -963,6 +1048,58 @@ export function AdminDashboard() {
                   </div>
                 )}
 
+                {/* Pending Approval Queue */}
+                {(() => {
+                  const pending = products.filter(p => p.status === 'pending');
+                  if (pending.length === 0) return null;
+                  const allChecked = pending.every(p => pendingQueueSelected.has(p.id));
+                  return (
+                    <div className="panel" style={{ marginBottom: 12, border: pendingQueueSelected.size > 0 ? '2px solid #eab308' : undefined }}>
+                      <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, background: '#fff3cd' }}>
+                        <span>⏳ Pending Queue ({pending.length})</span>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <button className="btn btn-sm btn-secondary" onClick={loadAll}>Refresh</button>
+                          <button className="btn btn-sm" style={{ background: '#dc3545', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={() => { setRejectAllReason(''); setRejectAllOpen(true); }}>Reject All</button>
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '24px minmax(0, 1fr) 90px 70px 60px 70px 14px auto', gap: 10, padding: '8px 16px', fontSize: 11, color: '#999', fontWeight: 600, textTransform: 'uppercase', borderBottom: '1px solid #f0f0f0', alignItems: 'center' }}>
+                        <input type="checkbox" checked={allChecked} onChange={e => setPendingQueueSelected(e.target.checked ? new Set(pending.map(p => p.id)) : new Set())} />
+                        <span>Product</span>
+                        <span>Platform</span>
+                        <span>Price</span>
+                        <span>Stock</span>
+                        <span>Accounts</span>
+                        <span />
+                        <span style={{ textAlign: 'right' }}>Actions</span>
+                      </div>
+                      {pending.map(p => {
+                        const accountLines = (p.accountsData || '').split(/\r?\n/).filter(Boolean);
+                        return (
+                          <div key={p.id} className="row" style={{ display: 'grid', gridTemplateColumns: '24px minmax(0, 1fr) 90px 70px 60px 70px 14px auto', gap: 10, padding: '10px 16px', borderBottom: '1px solid #f0f0f0', alignItems: 'center' }}>
+                            <input type="checkbox" checked={pendingQueueSelected.has(p.id)} onChange={() => { setPendingQueueSelected(prev => { const next = new Set(prev); if (next.has(p.id)) next.delete(p.id); else next.add(p.id); return next; }); }} />
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontWeight: 600, fontSize: 13 }}>{p.title}</div>
+                              <div style={{ fontSize: 11, color: '#888' }}>
+                                <span style={{ color: '#1976d2', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => loadUserDetail(p.vendor.id)}>@{p.vendor.username}</span>
+                              </div>
+                            </div>
+                            <span style={{ fontSize: 12, color: '#666' }}>{platformLabel(p.platform)}</span>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#3ea136' }}>{money(p.storePrice)}</span>
+                            <span style={{ fontSize: 12 }}>{p.stock}</span>
+                            <span style={{ fontSize: 12, color: '#888' }}>{accountLines.length}</span>
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.stock === 0 ? '#dc3545' : p.stock <= 5 ? '#ff9800' : '#28a745', display: 'inline-block' }} />
+                            <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                              <button className="btn btn-sm" style={{ background: '#17a2b8', color: '#fff', border: 'none', padding: '4px 8px', fontSize: 11, borderRadius: 4 }} onClick={() => setPreviewProduct(p)}>Preview</button>
+                              <button className="btn btn-sm" style={{ background: '#28a745', color: '#fff', border: 'none', padding: '4px 8px', fontSize: 11, borderRadius: 4 }} onClick={() => doProductAction('approve', p.id)}>Approve</button>
+                              <button className="btn btn-sm" style={{ background: '#dc3545', color: '#fff', border: 'none', padding: '4px 8px', fontSize: 11, borderRadius: 4 }} onClick={() => { setRejectProduct(p); setRejectReason(''); }}>Reject</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
                 {/* Group products by title */}
                 {(() => {
                   const searched = filteredProducts.filter(p => !search || p.title.toLowerCase().includes(search.toLowerCase()) || p.vendor.username.toLowerCase().includes(search.toLowerCase()));
@@ -975,6 +1112,7 @@ export function AdminDashboard() {
                   return Array.from(groups.entries()).map(([title, groupProducts]) => {
                     const totalStock = groupProducts.reduce((s, p) => s + p.stock, 0);
                     const totalValue = groupProducts.reduce((s, p) => s + p.storePrice * p.stock, 0);
+                    const soldCount = groupProducts.reduce((s, p) => s + ((p as any).soldCount || 0), 0);
                     const vendors = [...new Map(groupProducts.map(p => [p.vendor.id, p.vendor])).values()];
                     const isExpanded = expandedGroup === title;
                     const view = groupView[title] || 'list';
@@ -1024,6 +1162,7 @@ export function AdminDashboard() {
                             <span>{vendors.length} vendor{vendors.length !== 1 ? 's' : ''}</span>
                             <span>·</span>
                             <span>{totalStock} stock</span>
+                            {soldCount > 0 && (<><span>·</span><span>{soldCount} sold</span></>)}
                             <span>·</span>
                             <span style={{ fontWeight: 600, color: '#3ea136' }}>{money(totalValue)}</span>
                           </div>
@@ -1157,16 +1296,27 @@ export function AdminDashboard() {
                         {isExpanded && view === 'list' && (
                           <div style={{ padding: '4px 0' }}>
                             {/* Product-level actions bar */}
+                            <div style={{ padding: '6px 16px', background: '#f5f5f5', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '2px solid #e0e0e0' }}>
+                              <input type="checkbox" checked={groupProducts.length > 0 && groupProducts.every(p => listSelected.has(p.id))} onChange={e => setListSelected(prev => {
+                                const next = new Set(prev);
+                                groupProducts.forEach(p => { if (e.target.checked) next.add(p.id); else next.delete(p.id); });
+                                return next;
+                              })} />
+                              <span style={{ fontSize: 11, fontWeight: 600, color: '#666' }}>Select All</span>
+                              <span style={{ fontSize: 11, color: '#888' }}>({groupProducts.filter(p => listSelected.has(p.id)).length} selected)</span>
+                            </div>
                             {groupProducts.map(p => {
                               const accountLines = (p.accountsData || '').split(/\r?\n/).filter(Boolean);
                               return (
                                 <div key={p.id} style={{ borderBottom: '2px solid #e0e0e0' }}>
                                   {/* Vendor header for this product */}
                                   <div style={{ padding: '6px 16px', background: '#fafafa', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                    <input type="checkbox" checked={listSelected.has(p.id)} onChange={() => { setListSelected(prev => { const next = new Set(prev); if (next.has(p.id)) next.delete(p.id); else next.add(p.id); return next; }); }} style={{ flexShrink: 0 }} />
                                     <span
                                       style={{ fontWeight: 600, fontSize: 12, color: '#1976d2', cursor: 'pointer', textDecoration: 'underline' }}
                                       onClick={() => loadUserDetail(p.vendor.id)}
                                     >@{p.vendor.username}</span>
+                                    <span style={{ fontSize: 10, color: '#888' }}>#{(p as any).sku || 'N/A'}</span>
                                     <span className={`badge badge-${p.status}`} style={{ fontSize: 10 }}>{p.status}</span>
                                     {p.isDuplicate && <span style={{ color: '#e53e3e', fontSize: 10 }}>[DUPE]</span>}
                                     <span style={{ fontSize: 11, color: '#3ea136', fontWeight: 600 }}>{money(p.storePrice)}/ea</span>
@@ -1201,13 +1351,13 @@ export function AdminDashboard() {
                                               <input type="text" value={editingLineText} onChange={e => setEditingLineEdit(e.target.value)} style={{ flex: 1, fontFamily: 'monospace', fontSize: 11, padding: '2px 6px', border: '1px solid #3ea136', borderRadius: 3 }} autoFocus onKeyDown={e => {
                                                 if (e.key === 'Enter') {
                                                   fetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'edit_account_line', productId: p.id, lineIndex: lineIdx, newLine: editingLineText }) })
-                                                    .then(r => r.json()).then(r => { if (r.success) { loadAll(); setEditingLine(null); } else alert(r.error); });
+                                                    .then(r => r.json()).then(r => { if (r.success) { loadAll(); setEditingLine(null); } else toast(r.error || 'Failed to edit line', 'error'); });
                                                 }
                                                 if (e.key === 'Escape') setEditingLine(null);
                                               }} />
                                               <button className="btn btn-primary btn-sm" onClick={() => {
                                                 fetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'edit_account_line', productId: p.id, lineIndex: lineIdx, newLine: editingLineText }) })
-                                                  .then(r => r.json()).then(r => { if (r.success) { loadAll(); setEditingLine(null); } else alert(r.error); });
+                                                  .then(r => r.json()).then(r => { if (r.success) { loadAll(); setEditingLine(null); } else toast(r.error || 'Failed to edit line', 'error'); });
                                               }}>Save</button>
                                               <button className="btn btn-secondary btn-sm" onClick={() => setEditingLine(null)}>Cancel</button>
                                             </div>
@@ -1220,7 +1370,7 @@ export function AdminDashboard() {
                                               <button className="btn btn-danger btn-sm" style={{ fontSize: 10, padding: '1px 5px' }} title="Delete line" onClick={() => {
                                                 if (confirm(`Delete this account line?`)) {
                                                   fetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete_account_line', productId: p.id, lineIndex: lineIdx }) })
-                                                    .then(r => r.json()).then(r => { if (r.success) loadAll(); else alert(r.error); });
+                                                    .then(r => r.json()).then(r => { if (r.success) loadAll(); else toast(r.error || 'Failed to delete line', 'error'); });
                                                 }
                                               }}>Del</button>
                                             </div>
@@ -1271,6 +1421,34 @@ export function AdminDashboard() {
                     );
                   });
                 })()}
+
+                {/* Floating batch action bar */}
+                {(() => {
+                  const allSelected = Array.from(new Set([...pendingQueueSelected, ...listSelected]));
+                  if (allSelected.length === 0) return null;
+                  const batchAction = async (action: 'batch_approve' | 'batch_reject' | 'batch_delete', label: string) => {
+                    if (action !== 'batch_approve' && !confirm(`${label.charAt(0).toUpperCase() + label.slice(1)} ${allSelected.length} selected products?`)) return;
+                    try {
+                      const res = await fetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ids: allSelected }) });
+                      const r = await res.json();
+                      if (r.success) {
+                        toast(`${r.count || allSelected.length} products ${label}`, 'success');
+                        setPendingQueueSelected(new Set());
+                        setListSelected(new Set());
+                        loadAll();
+                      } else toast(r.error || 'Action failed', 'error');
+                    } catch { toast('Action failed', 'error'); }
+                  };
+                  return (
+                    <div style={{ position: 'fixed', bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 950, background: '#222', color: '#fff', borderRadius: 8, padding: '8px 14px', display: 'flex', gap: 8, alignItems: 'center', boxShadow: '0 4px 20px rgba(0,0,0,0.35)' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700 }}>{allSelected.length} selected</span>
+                      <button style={{ padding: '5px 12px', borderRadius: 4, border: 'none', background: '#28a745', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={() => batchAction('batch_approve', 'approved')}>Approve Selected</button>
+                      <button style={{ padding: '5px 12px', borderRadius: 4, border: 'none', background: '#eab308', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={() => batchAction('batch_reject', 'rejected')}>Reject Selected</button>
+                      <button style={{ padding: '5px 12px', borderRadius: 4, border: 'none', background: '#dc3545', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={() => batchAction('batch_delete', 'deleted')}>Delete Selected</button>
+                      <button style={{ background: 'none', border: 'none', color: '#aaa', cursor: 'pointer', fontSize: 14 }} onClick={() => { setPendingQueueSelected(new Set()); setListSelected(new Set()); }}>×</button>
+                    </div>
+                  );
+                })()}
               </>
             )}
 
@@ -1302,6 +1480,7 @@ export function AdminDashboard() {
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {selectedProduct.status === "pending" && <button className="btn btn-primary btn-sm" onClick={() => doProductAction("approve", selectedProduct.id)}>Approve</button>}
                       {selectedProduct.status === "pending" && <button className="btn btn-danger btn-sm" onClick={() => { setRejectProduct(selectedProduct); setRejectReason(""); }}>Reject</button>}
+                      <button className="btn btn-secondary btn-sm" onClick={() => setViewAccountsProduct(selectedProduct)}>View Accounts</button>
                       <button className="btn btn-secondary btn-sm" onClick={() => { setEditProduct(selectedProduct); setEpTitle(selectedProduct.title); setEpDesc(selectedProduct.description); setEpPrice(String(selectedProduct.vendorPrice)); setEpStock(String(selectedProduct.stock)); }}>Edit</button>
                       <button className="btn btn-danger btn-sm" onClick={() => { if (confirm(`Delete "${selectedProduct.title}"?`)) doProductAction("delete", selectedProduct.id); }}>Delete</button>
                     </div>
@@ -1370,7 +1549,7 @@ export function AdminDashboard() {
                           return (
                             <div key={u.id}>
                               <div className="row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px 80px', gap: 10, alignItems: 'center', cursor: 'pointer' }} onClick={() => setMgmtExpanded(isExpanded ? null : expKey)}>
-                                <div><span style={{ fontWeight: 600, color: '#1976d2', textDecoration: 'underline' }}>{u.name || u.username}</span> <span style={{ fontSize: 11, color: '#888' }}>@{u.username}</span></div>
+                                <div><span style={{ fontWeight: 600, color: '#1976d2', textDecoration: 'underline' }}>{u.name || u.username}</span> <span style={{ fontSize: 11, color: '#888' }}>@{u.username}</span><span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 8, background: "#e8f5e9", color: "#2e7d32", fontWeight: 600, marginLeft: 6 }}>User</span></div>
                                 <div style={{ fontSize: 12, color: '#666' }}>{u.email}</div>
                                 <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: u.blocked ? '#fde8e8' : '#e8f5e9', color: u.blocked ? '#c62828' : '#2e7d32' }}>{u.blocked ? 'Blocked' : 'Active'}</span>
                                 <span style={{ fontWeight: 600, color: '#3ea136', fontSize: 12, textAlign: 'right' }}>{money(u.balance)}</span>
@@ -1386,7 +1565,7 @@ export function AdminDashboard() {
                                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                     <button className="btn btn-primary btn-sm" style={{ background: '#1976d2', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); loadUserDetail(u.id); }}>Open Detail</button>
                                     <button className="btn btn-sm" style={{ background: '#28a745', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setEditUser(u); setEditName(u.name); setEditUsername(u.username); setEditEmail(u.email); setEditBalance(String(u.balance)); setEditRole(u.role); setEditPassword(''); }}>Edit</button>
-                                    <button className="btn btn-sm" style={{ background: '#5fa830', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setTopupUser(u); setTopupAmount(''); }}>Top-up</button>
+                                    <button className="btn btn-sm" style={{ background: '#5fa830', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setTopupUser(u); setTopupAmount(''); setTopupReason(''); }}>Top-up</button>
                                     <button className="btn btn-sm" style={{ background: '#666', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setMsgUser(u); setMsgTitle(''); setMsgBody(''); }}>Message</button>
                                     {u.muted ? (
                                       <button className="btn btn-sm" style={{ background: '#ff9800', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); doUserAction('unmute', u.id); }}>Unmute</button>
@@ -1412,7 +1591,7 @@ export function AdminDashboard() {
                           return (
                             <div key={u.id}>
                               <div className="row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px 80px', gap: 10, alignItems: 'center', cursor: 'pointer' }} onClick={() => setMgmtExpanded(isExpanded ? null : expKey)}>
-                                <div><span style={{ fontWeight: 600, color: '#1976d2', textDecoration: 'underline' }}>{u.name || u.username}</span> <span style={{ fontSize: 11, color: '#888' }}>@{u.username}</span></div>
+                                <div><span style={{ fontWeight: 600, color: '#1976d2', textDecoration: 'underline' }}>{u.name || u.username}</span> <span style={{ fontSize: 11, color: '#888' }}>@{u.username}</span><span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 8, background: "#e3f2fd", color: "#1565c0", fontWeight: 600, marginLeft: 6 }}>Vendor</span></div>
                                 <div style={{ fontSize: 12, color: '#666' }}>{u.email}</div>
                                 <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: u.vendorStatus === 'approved' ? '#e8f5e9' : '#fff3cd', color: u.vendorStatus === 'approved' ? '#2e7d32' : '#856404' }}>{u.vendorStatus}</span>
                                 <span style={{ fontWeight: 600, color: '#3ea136', fontSize: 12, textAlign: 'right' }}>{money(u.balance)}</span>
@@ -1428,7 +1607,7 @@ export function AdminDashboard() {
                                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                     <button className="btn btn-primary btn-sm" style={{ background: '#1976d2', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); loadUserDetail(u.id); }}>Open Detail</button>
                                     <button className="btn btn-sm" style={{ background: '#28a745', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setEditUser(u); setEditName(u.name); setEditUsername(u.username); setEditEmail(u.email); setEditBalance(String(u.balance)); setEditRole(u.role); setEditPassword(''); }}>Edit</button>
-                                    <button className="btn btn-sm" style={{ background: '#5fa830', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setTopupUser(u); setTopupAmount(''); }}>Top-up</button>
+                                    <button className="btn btn-sm" style={{ background: '#5fa830', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setTopupUser(u); setTopupAmount(''); setTopupReason(''); }}>Top-up</button>
                                     <button className="btn btn-sm" style={{ background: '#666', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); setMsgUser(u); setMsgTitle(''); setMsgBody(''); }}>Message</button>
                                     {u.muted ? (
                                       <button className="btn btn-sm" style={{ background: '#ff9800', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={e => { e.stopPropagation(); doUserAction('unmute', u.id); }}>Unmute</button>
@@ -1454,7 +1633,7 @@ export function AdminDashboard() {
                           return (
                             <div key={p.id}>
                               <div className="row" style={{ display: 'grid', gridTemplateColumns: '1fr 100px 60px 80px', gap: 10, alignItems: 'center', cursor: 'pointer' }} onClick={() => setMgmtExpanded(isExpanded ? null : expKey)}>
-                                <div><span style={{ fontWeight: 600 }}>{p.title}</span> <span style={{ fontSize: 11, color: '#888' }}>by @{p.vendor.username}</span></div>
+                                <div><span style={{ fontWeight: 600 }}>{p.title}</span> <span style={{ fontSize: 11, color: '#888' }}>by @{p.vendor.username}</span><span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 8, background: "#f3e5f5", color: "#6a1b9a", fontWeight: 600, marginLeft: 6 }}>Product</span></div>
                                 <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: p.status === 'approved' ? '#e8f5e9' : p.status === 'pending' ? '#fff3cd' : '#fde8e8', color: p.status === 'approved' ? '#2e7d32' : p.status === 'pending' ? '#856404' : '#c62828' }}>{p.status}</span>
                                 <span style={{ fontSize: 12, color: '#888' }}>{p.stock} stock</span>
                                 <span style={{ fontWeight: 600, color: '#3ea136', fontSize: 12, textAlign: 'right' }}>{money(p.storePrice)}</span>
@@ -1582,59 +1761,182 @@ export function AdminDashboard() {
             {/* ==================== DEPOSITS ==================== */}
             {tab === "deposits" && (
               <>
-                <div className="panel" style={{ marginBottom: 12 }}>
-                  <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>💰 All Deposits ({allDeposits.length})</span>
-                    <button className="btn btn-sm btn-secondary" onClick={fetchDeposits}>Refresh</button>
-                  </div>
-                  {allDeposits.length === 0 ? (
-                    <div style={{ padding: 20, color: '#888', fontSize: 13, textAlign: 'center' }}>No deposits found. Deposits will appear here when users fund their accounts.</div>
-                  ) : (
-                    allDeposits.map((d: any) => (
-                      <div key={d.id} className="row" style={{ borderBottom: '1px solid #eee', padding: 12 }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 80px 90px', gap: 10, alignItems: 'center' }}>
-                          <div>
-                            <div style={{ fontWeight: 600, fontSize: 13, color: '#1976d2', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => d.userId && loadUserDetail(d.userId)}>{d.user?.username || d.userId}</div>
-                            <div style={{ fontSize: 11, color: '#888' }}>{d.user?.email || ''}</div>
-                          </div>
-                          <div style={{ fontSize: 12, color: '#666' }}>{d.network || d.method}</div>
-                          <div>
-                            <div style={{ fontWeight: 700, color: '#3ea136', fontSize: 14 }}>{money(d.amount)}</div>
-                            {d.exactAmount && <div style={{ fontSize: 10, color: '#888' }}>Exact: {d.exactAmount} USDT</div>}
-                          </div>
-                          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: d.status === 'completed' ? '#e8f5e9' : d.status === 'pending' ? '#fff3cd' : '#fde8e8', color: d.status === 'completed' ? '#2e7d32' : d.status === 'pending' ? '#856404' : '#c62828' }}>{d.status}</span>
-                          <span style={{ fontSize: 10, color: '#aaa', textAlign: 'right' }}>{new Date(d.createdAt).toLocaleDateString()}</span>
+                {(() => {
+                  const totalAmount = allDeposits.reduce((s: number, d: any) => s + (d.amount || 0), 0);
+                  const pendingAmount = allDeposits.filter((d: any) => d.status === 'pending').reduce((s: number, d: any) => s + (d.amount || 0), 0);
+                  return (
+                    <div className="panel" style={{ marginBottom: 12 }}>
+                      <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                        <span>💰 All Deposits ({allDeposits.length})</span>
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 12 }}>
+                          <span style={{ fontWeight: 600 }}>Total: <span style={{ color: '#3ea136' }}>{money(totalAmount)}</span></span>
+                          <span style={{ fontWeight: 600 }}>Pending: <span style={{ color: '#eab308' }}>{money(pendingAmount)}</span></span>
+                          <button className="btn btn-sm btn-secondary" onClick={fetchDeposits}>Refresh</button>
                         </div>
-                        <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 11 }}>
-                          {d.txHash && (
-                            <div style={{ padding: '4px 8px', background: '#f5f5f5', borderRadius: 4, fontFamily: 'monospace', color: '#555', wordBreak: 'break-all', flex: '1 1 300px' }}>
-                              TX: {d.txHash}
+                      </div>
+                      {allDeposits.length === 0 ? (
+                        <div style={{ padding: 20, color: '#888', fontSize: 13, textAlign: 'center' }}>No deposits found. Deposits will appear here when users fund their accounts.</div>
+                      ) : (
+                        allDeposits.map((d: any) => (
+                          <div key={d.id} className="row" style={{ borderBottom: '1px solid #eee', padding: 12 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 80px 90px', gap: 10, alignItems: 'center' }}>
+                              <div>
+                                <div style={{ fontWeight: 600, fontSize: 13, color: '#1976d2', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => d.userId && loadUserDetail(d.userId)}>{d.user?.username || d.userId}</div>
+                                <div style={{ fontSize: 11, color: '#888' }}>{d.user?.email || ''}</div>
+                              </div>
+                              <div style={{ fontSize: 12, color: '#666' }}>{d.network || d.method}</div>
+                              <div>
+                                <div style={{ fontWeight: 700, color: '#3ea136', fontSize: 14 }}>{money(d.amount)}</div>
+                                {d.exactAmount && <div style={{ fontSize: 10, color: '#888' }}>Exact: {d.exactAmount} USDT</div>}
+                              </div>
+                              <div>
+                                <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: d.status === 'completed' ? '#e8f5e9' : d.status === 'pending' ? '#fff3cd' : '#fde8e8', color: d.status === 'completed' ? '#2e7d32' : d.status === 'pending' ? '#856404' : '#c62828' }}>{d.status}</span>
+                                {d.status === 'completed' && <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>Completed</div>}
+                              </div>
+                              <span style={{ fontSize: 10, color: '#aaa', textAlign: 'right' }}>{new Date(d.createdAt).toLocaleDateString()}</span>
                             </div>
+                            <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 11 }}>
+                              {d.txHash && (
+                                <div style={{ padding: '4px 8px', background: '#f5f5f5', borderRadius: 4, fontFamily: 'monospace', color: '#555', wordBreak: 'break-all', flex: '1 1 300px' }}>
+                                  TX: {d.txHash}
+                                </div>
+                              )}
+                              {d.walletAddress && (
+                                <div style={{ padding: '4px 8px', background: '#f0f7ff', borderRadius: 4, fontFamily: 'monospace', color: '#555', wordBreak: 'break-all', flex: '1 1 300px' }}>
+                                  Wallet: {d.walletAddress}
+                                </div>
+                              )}
+                              {d.status === 'pending' && (
+                                <div style={{ flexShrink: 0 }}>
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    <button style={{ padding: '4px 10px', borderRadius: 4, border: 'none', background: '#28a745', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={async () => { if (!confirm('Approve this deposit?')) return; const res = await fetch('/api/deposits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_approve', depositId: d.id }) }); if (res.ok) fetchDeposits(); }}>Approve</button>
+                                    <button style={{ padding: '4px 10px', borderRadius: 4, border: 'none', background: '#dc3545', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={async () => { if (!confirm('Reject this deposit?')) return; const res = await fetch('/api/deposits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_reject', depositId: d.id }) }); if (res.ok) fetchDeposits(); }}>Reject</button>
+                                    <button style={{ padding: '4px 10px', borderRadius: 4, border: 'none', background: '#17a2b8', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={async () => {
+                                      try {
+                                        const res = await fetch('/api/deposits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_verify', depositId: d.id }) });
+                                        const r = await res.json();
+                                        if (res.ok && r.success) {
+                                          const v = r.result || {};
+                                          const text = v.confirmed ? `Confirmed on-chain${v.amount ? ` · ${v.amount} USDT` : ''}` : v.partial ? `Partial: ${v.actualAmount || 0}/${v.expectedAmount || d.amount} USDT` : (v.reason || 'Verified');
+                                          setDepositVerify(prev => ({ ...prev, [d.id]: { ok: v.confirmed !== false, text } }));
+                                          toast(v.confirmed ? 'Deposit verified on-chain' : 'On-chain check completed', v.confirmed ? 'success' : 'info');
+                                        } else {
+                                          setDepositVerify(prev => ({ ...prev, [d.id]: { ok: false, text: r.error || 'Verification failed' } }));
+                                          toast(r.error || 'Verification failed', 'error');
+                                        }
+                                      } catch { toast('Verification failed', 'error'); }
+                                    }}>Verify on-chain</button>
+                                  </div>
+                                  {depositVerify[d.id] && (
+                                    <div style={{ fontSize: 11, color: depositVerify[d.id].ok ? '#2e7d32' : '#c62828', marginTop: 4 }}>
+                                      {depositVerify[d.id].ok ? '✓' : '✕'} {depositVerify[d.id].text}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  );
+                })()}
+              </>
+            )}
+
+            {/* ==================== DISPUTES ==================== */}
+            {tab === "disputes" && (
+              <div className="panel">
+                <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>⚖️ Disputes ({allDisputes.length})</span>
+                  <button className="btn btn-sm btn-secondary" onClick={() => { fetch('/api/dashboard/admin').then(r => r.json()).then(d => { setAllDisputes(d.allDisputes || []); }); }}>Refresh</button>
+                </div>
+                {allDisputes.length === 0 ? <div style={{ padding: 20, color: '#888', fontSize: 13, textAlign: 'center' }}>No disputes</div> :
+                  allDisputes.map(d => (
+                    <div key={d.id} style={{ borderBottom: '1px solid #eee', padding: 12 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 10, alignItems: 'start' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: '#1976d2', cursor: 'pointer' }} onClick={() => d.buyer?.id && loadUserDetail(d.buyer.id)}>{d.buyer?.username || 'Unknown'} <span style={{ color: '#888', fontWeight: 400, fontSize: 11 }}>{d.buyer?.email || ''}</span></div>
+                          {d.purchase?.product?.title && (
+                            <div style={{ fontSize: 12, color: '#333', marginTop: 4 }}>Product: <strong>{d.purchase.product.title}</strong> {d.purchase.product.platform ? `(${d.purchase.product.platform})` : ''} · {money(d.purchase.product.storePrice || 0)} × {d.purchase.quantity || 1}</div>
                           )}
-                          {d.walletAddress && (
-                            <div style={{ padding: '4px 8px', background: '#f0f7ff', borderRadius: 4, fontFamily: 'monospace', color: '#555', wordBreak: 'break-all', flex: '1 1 300px' }}>
-                              Wallet: {d.walletAddress}
-                            </div>
+                          {d.purchase?.product?.vendor && (
+                            <div style={{ fontSize: 12, color: '#333', marginTop: 2 }}>Vendor: <strong>{d.purchase.product.vendor.username}</strong> <span style={{ color: '#888', fontSize: 11 }}>{d.purchase.product.vendor.email || ''}</span></div>
                           )}
-                          {d.status === 'pending' && (
-                            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                              <button style={{ padding: '4px 10px', borderRadius: 4, border: 'none', background: '#28a745', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={async () => { if (!confirm('Approve this deposit?')) return; const res = await fetch('/api/deposits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_approve', depositId: d.id }) }); if (res.ok) fetchDeposits(); }}>Approve</button>
-                              <button style={{ padding: '4px 10px', borderRadius: 4, border: 'none', background: '#dc3545', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={async () => { if (!confirm('Reject this deposit?')) return; const res = await fetch('/api/deposits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_reject', depositId: d.id }) }); if (res.ok) fetchDeposits(); }}>Reject</button>
-                            </div>
+                          <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>{d.reason}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 11, color: '#aaa' }}>{new Date(d.createdAt).toLocaleDateString()}</div>
+                          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, display: 'inline-block', marginTop: 4, background: d.status === 'open' ? '#fff3cd' : d.status === 'resolved' ? '#e8f5e9' : '#fde8e8', color: d.status === 'open' ? '#856404' : d.status === 'resolved' ? '#2e7d32' : '#c62828' }}>{d.status}</span>
+                          {d.status === 'resolved' && d.refundAmount > 0 && (
+                            <div style={{ fontSize: 12, fontWeight: 700, color: '#3ea136', marginTop: 4 }}>Refunded {money(d.refundAmount)}</div>
+                          )}
+                          {d.status === 'resolved' && d.vendorCharge > 0 && (
+                            <div style={{ fontSize: 11, color: '#c62828', marginTop: 2 }}>Vendor charged {money(d.vendorCharge)}</div>
                           )}
                         </div>
                       </div>
-                    ))
-                  )}
-                </div>
-              </>
+                      {d.purchase?.accounts && (
+                        <pre style={{ fontSize: 11, background: '#f9f9f9', padding: 8, borderRadius: 4, fontFamily: 'monospace', overflowX: 'auto', whiteSpace: 'pre-wrap', marginTop: 6, marginBottom: 0 }}>{d.purchase.accounts}</pre>
+                      )}
+                      {d.status === 'open' && (
+                        <div style={{ marginTop: 8, display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <input type="text" placeholder="Resolution note..." value={disputeResolution[d.id] || ''} onChange={e => setDisputeResolution(prev => ({ ...prev, [d.id]: e.target.value }))} className="input" style={{ flex: 1, fontSize: 12, padding: '6px 10px' }} />
+                          <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                            <input type="checkbox" checked={disputeRefund[d.id] || false} onChange={e => setDisputeRefund(prev => ({ ...prev, [d.id]: e.target.checked }))} /> Refund & charge vendor
+                          </label>
+                          <button style={{ padding: '6px 12px', borderRadius: 4, border: 'none', background: '#28a745', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} onClick={async () => {
+                            const resolution = disputeResolution[d.id]?.trim();
+                            if (!resolution) { toast('Enter a resolution note', 'error'); return; }
+                            if (!confirm('Resolve this dispute? Buyer will be refunded and vendor charged.')) return;
+                            const res = await fetch('/api/admin/actions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'resolve_dispute', disputeId: d.id, resolution, refundBuyer: !!disputeRefund[d.id] }) });
+                            if (res.ok) {
+                              const rj = await res.json();
+                              setAllDisputes(prev => prev.map(x => x.id === d.id ? { ...x, status: 'resolved', resolution, refundAmount: rj.refundAmount || 0, vendorCharge: rj.vendorCharge || 0 } : x));
+                              setDisputeResolution(prev => { const p = { ...prev }; delete p[d.id]; return p; });
+                              loadAll();
+                            } else { const r = await res.json(); toast(r.error || 'Failed to resolve', 'error'); }
+                          }}>Resolve</button>
+                        </div>
+                      )}
+                      {d.resolution && (
+                        <div style={{ marginTop: 6, padding: '6px 10px', background: '#f0f7ff', borderRadius: 4, fontSize: 11, color: '#555' }}>
+                          Resolution: {d.resolution}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                }
+              </div>
+            )}
+
+            {/* ==================== NOTIFICATIONS ==================== */}
+            {tab === "notifications" && (
+              <div className="panel">
+                <div className="panel-head">Notifications</div>
+                {notifList.length === 0 ? <div style={{ padding: 20, color: '#888', fontSize: 13, textAlign: 'center' }}>No notifications</div> : notifList.map(n => (
+                  <div key={n.id} className="row">
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{n.title}</div>
+                      <div style={{ fontSize: 11, color: '#888' }}>{n.message}</div>
+                    </div>
+                    <span style={{ fontSize: 10, color: '#aaa' }}>{new Date(n.createdAt).toLocaleDateString()}</span>
+                  </div>
+                ))}
+              </div>
             )}
 
             {/* ==================== NOTICES ==================== */}
             {tab === "notices" && (
               <>
                 <div className="panel" style={{ marginBottom: 12 }}>
-                  <div className="panel-head">Send Notice</div>
+                  <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>Send Notice</span>
+                    {!noticeFormOpen && (
+                      <button className="btn btn-sm btn-primary" onClick={() => { setNoticeFormOpen(true); setEditingNotice(null); }}>Send New Notice</button>
+                    )}
+                  </div>
+                  {noticeFormOpen && (
                   <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                       <div><label className="label">Title</label><input type="text" value={noticeTitle} onChange={e => setNoticeTitle(e.target.value)} className="input" required /></div>
@@ -1667,13 +1969,58 @@ export function AdminDashboard() {
                         </select>
                       )}
                     </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <label className="label" style={{ marginBottom: 0 }}>Closeable by users:</label>
+                      <select value={noticeCloseable ? "yes" : "no"} onChange={e => setNoticeCloseable(e.target.value === "yes")} className="input" style={{ width: 120 }}>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    </div>
                     <div style={{ display: "flex", gap: 6 }}>
                       <div style={{ fontSize: 12, color: "#888", padding: "6px 0" }}>
                         Notice types: <span style={{ color: "#e53e3e" }}>urgent</span> · <span style={{ color: "#3ea136" }}>coupon</span> · <span style={{ color: "#2196f3" }}>info</span> · <span style={{ color: "#ff9800" }}>goodnews</span> · <span style={{ color: "#9c27b0" }}>warning</span>
                       </div>
                     </div>
-                    <button className="btn btn-primary" onClick={sendNotice}>Send Notice</button>
+                    {editingNotice ? (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="btn btn-primary" onClick={saveNoticeEdit}>Update Notice</button>
+                        <button className="btn btn-secondary" onClick={() => { setEditingNotice(null); setNoticeTitle(""); setNoticeBody(""); }}>Cancel Edit</button>
+                      </div>
+                    ) : (
+                      <button className="btn btn-primary" onClick={sendNotice}>Send Notice</button>
+                    )}
                   </div>
+                  )}
+                </div>
+                <div className="panel">
+                  <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>Notice List ({allNotices.length})</span>
+                    <button className="btn btn-sm btn-secondary" onClick={loadNotices}>Refresh</button>
+                  </div>
+                  {allNotices.length === 0 ? (
+                    <div style={{ padding: 20, color: "#888", fontSize: 13, textAlign: "center" }}>No notices created yet</div>
+                  ) : allNotices.map(n => (
+                    <div key={n.id} style={{ padding: 12, borderBottom: "1px solid #eee" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 13, fontWeight: 700 }}>{n.title}</span>
+                            <span className={`badge badge-${n.type}`}>{n.type}</span>
+                            <span className={`badge ${n.active ? "badge-approved" : "badge-rejected"}`}>{n.active ? "Active" : "Inactive"}</span>
+                            {n.closeable === false && <span style={{ fontSize: 10, color: "#888" }}>not closeable</span>}
+                          </div>
+                          <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>{n.message}</div>
+                          <div style={{ fontSize: 10, color: "#aaa", marginTop: 4 }}>{new Date(n.createdAt).toLocaleString()}</div>
+                          {n.hiddenForUserIds && (() => { try { const h = JSON.parse(n.hiddenForUserIds); return h.length > 0 ? <div style={{ fontSize: 10, color: "#e53e3e", marginTop: 2 }}>Hidden from {h.length} user(s)</div> : null; } catch { return null; } })()}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
+                          <button className="btn btn-sm btn-secondary" onClick={() => { setEditingNotice(n); setNoticeTitle(n.title); setNoticeBody(n.message.replace(/^\[NOTICE:[^\]]+\]\s*/, "")); setNoticeType(n.type || "info"); setNoticeCloseable(n.closeable !== false); setNoticeActive(n.active !== false); }}>Edit</button>
+                          <button className="btn btn-sm btn-secondary" onClick={() => { setHideNotice(n); const s = new Set<string>(); if (n.hiddenForUserIds) { try { JSON.parse(n.hiddenForUserIds).forEach((id: string) => s.add(id)); } catch {} } setHideNoticeUserIds(s); }}>Hide from users</button>
+                          <button className="btn btn-sm btn-danger" onClick={() => deleteNotice(n.id)}>Delete</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </>
             )}
@@ -1825,25 +2172,49 @@ export function AdminDashboard() {
                 <span>Support Tickets</span>
                 <button className="btn btn-sm btn-secondary" onClick={() => fetchChatSessions(chatSessionFilter)}>Refresh</button>
               </div>
-              <div style={{ display: 'flex', gap: 4, padding: '8px 12px', borderBottom: '1px solid #eee', flexWrap: 'wrap' }}>
-                {[{ v: '', l: 'All' }, { v: 'open', l: 'Open' }, { v: 'assigned', l: 'Assigned' }, { v: 'resolved', l: 'Resolved' }, { v: 'closed', l: 'Closed' }].map(f => (
-                  <button key={f.v} onClick={() => setChatSessionFilter(f.v)} style={{ padding: '3px 8px', fontSize: 11, borderRadius: 3, border: chatSessionFilter === f.v ? '2px solid #3ea136' : '1px solid #ddd', background: chatSessionFilter === f.v ? '#e8f5e9' : '#fff', cursor: 'pointer', fontWeight: chatSessionFilter === f.v ? 600 : 400 }}>{f.l}</button>
-                ))}
-              </div>
-              {chatSessions.length === 0 && <div style={{ padding: 20, color: '#888', fontSize: 12, textAlign: 'center' }}>No tickets</div>}
-              {chatSessions.map((s: any) => (
-                <div key={s.id} onClick={() => openChatSessionAdmin(s.id)} style={{ padding: '10px 12px', borderBottom: '1px solid #f0f0f0', cursor: 'pointer', background: activeChatSession?.id === s.id ? '#f0f7ed' : 'transparent' }} onMouseEnter={e => (e.currentTarget.style.background = '#f9f9f9')} onMouseLeave={e => (e.currentTarget.style.background = activeChatSession?.id === s.id ? '#f0f7ed' : 'transparent')}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>{s.subject}</span>
-                    {s.unreadCount > 0 && <span style={{ background: '#e53e3e', color: '#fff', fontSize: 10, padding: '2px 6px', borderRadius: 10, fontWeight: 600 }}>{s.unreadCount}</span>}
-                  </div>
-                  <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>@{s.user?.username} · {s.category}</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                    <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, background: s.status === 'open' ? '#e8f5e9' : s.status === 'assigned' ? '#e3f2fd' : '#eee', color: s.status === 'open' ? '#2e7d32' : '#1565c0' }}>{s.status}</span>
-                    <span style={{ fontSize: 10, color: '#aaa' }}>{new Date(s.updatedAt).toLocaleDateString()}</span>
-                  </div>
+              <div style={{ padding: '8px 12px', borderBottom: '1px solid #eee' }}>
+                <input type="text" placeholder="Search tickets..." value={chatSearch} onChange={e => setChatSearch(e.target.value)} className="input" style={{ marginBottom: 6, fontSize: 12, padding: '6px 8px' }} />
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {[{ v: '', l: 'All' }, { v: 'open', l: 'Open' }, { v: 'assigned', l: 'Assigned' }, { v: 'resolved', l: 'Resolved' }, { v: 'closed', l: 'Closed' }].map(f => (
+                    <button key={f.v} onClick={() => setChatSessionFilter(f.v)} style={{ padding: '3px 8px', fontSize: 11, borderRadius: 3, border: chatSessionFilter === f.v ? '2px solid #3ea136' : '1px solid #ddd', background: chatSessionFilter === f.v ? '#e8f5e9' : '#fff', cursor: 'pointer', fontWeight: chatSessionFilter === f.v ? 600 : 400 }}>{f.l}</button>
+                  ))}
+                  <select value={chatSort} onChange={e => setChatSort(e.target.value as 'recent' | 'priority')} style={{ marginLeft: 'auto', padding: '3px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #ddd', background: '#fff', cursor: 'pointer' }}>
+                    <option value="recent">Recent</option>
+                    <option value="priority">Priority</option>
+                  </select>
                 </div>
-              ))}
+              </div>
+              {(() => {
+                const q = chatSearch.trim().toLowerCase();
+                const filtered = chatSessions
+                  .filter((s: any) => !q || (s.subject || '').toLowerCase().includes(q) || (s.user?.username || '').toLowerCase().includes(q) || (s.user?.name || '').toLowerCase().includes(q))
+                  .sort((a: any, b: any) => chatSort === 'priority'
+                    ? (PRIORITY_WEIGHT[b.priority] || 0) - (PRIORITY_WEIGHT[a.priority] || 0) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+                    : new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+                return (
+                  <>
+                    {chatSessions.length === 0 && <div style={{ padding: 20, color: '#888', fontSize: 12, textAlign: 'center' }}>No tickets</div>}
+                    {chatSessions.length > 0 && filtered.length === 0 && <div style={{ padding: 20, color: '#888', fontSize: 12, textAlign: 'center' }}>No matching tickets</div>}
+                    {filtered.map((s: any) => (
+                      <div key={s.id} onClick={() => openChatSessionAdmin(s.id)} style={{ padding: '10px 12px', borderBottom: '1px solid #f0f0f0', cursor: 'pointer', background: activeChatSession?.id === s.id ? '#f0f7ed' : 'transparent' }} onMouseEnter={e => (e.currentTarget.style.background = '#f9f9f9')} onMouseLeave={e => (e.currentTarget.style.background = activeChatSession?.id === s.id ? '#f0f7ed' : 'transparent')}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 600, fontSize: 13 }}>{s.subject}</span>
+                          {s.unreadCount > 0 && <span style={{ background: '#e53e3e', color: '#fff', fontSize: 10, padding: '2px 6px', borderRadius: 10, fontWeight: 600 }}>{s.unreadCount}</span>}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>@{s.user?.username} · {s.category}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, background: s.status === 'open' ? '#e8f5e9' : s.status === 'assigned' ? '#e3f2fd' : '#eee', color: s.status === 'open' ? '#2e7d32' : '#1565c0' }}>{s.status}</span>
+                            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, fontWeight: 600, background: s.priority === 'urgent' ? '#fde8e8' : s.priority === 'high' ? '#fff3cd' : s.priority === 'low' ? '#f5f5f5' : '#eee', color: s.priority === 'urgent' ? '#c62828' : s.priority === 'high' ? '#856404' : s.priority === 'low' ? '#999' : '#666' }}>{s.priority}</span>
+                            {s.rating ? <span style={{ fontSize: 10, color: '#ff9800', fontWeight: 600 }} title={s.ratingComment ? `Rating comment: ${s.ratingComment}` : ''}>★ {s.rating}/5</span> : null}
+                          </div>
+                          <span style={{ fontSize: 10, color: '#aaa' }}>{new Date(s.updatedAt).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                );
+              })()}
             </div>
           </div>
           {/* Chat area */}
@@ -1855,14 +2226,37 @@ export function AdminDashboard() {
                 <div className="panel" style={{ marginBottom: 8 }}>
                   <div style={{ padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                     <div>
-                      <div style={{ fontWeight: 700, fontSize: 15 }}>{activeChatSession.subject}</div>
-                      <div style={{ fontSize: 11, color: '#888' }}>@{activeChatSession.user?.username} · {activeChatSession.category} · {activeChatSession.priority}</div>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>
+                        {activeChatSession.subject}
+                        <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, marginLeft: 6, background: activeChatSession.priority === 'urgent' ? '#fde8e8' : activeChatSession.priority === 'high' ? '#fff3cd' : activeChatSession.priority === 'low' ? '#f5f5f5' : '#eee', color: activeChatSession.priority === 'urgent' ? '#c62828' : activeChatSession.priority === 'high' ? '#856404' : activeChatSession.priority === 'low' ? '#999' : '#666', fontWeight: 600, verticalAlign: 'middle' }}>{activeChatSession.priority}</span>
+                        {activeChatSession.rating ? <span style={{ fontSize: 11, color: '#ff9800', marginLeft: 6 }} title={activeChatSession.ratingComment ? `Rating comment: ${activeChatSession.ratingComment}` : ''}>★ {activeChatSession.rating}/5</span> : null}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#888' }}>@{activeChatSession.user?.username} · {activeChatSession.category}</div>
+                      {activeChatSession.ratingComment && <div style={{ fontSize: 10, color: '#888', fontStyle: 'italic', marginTop: 2 }}>"{activeChatSession.ratingComment}"</div>}
+                      {(() => {
+                        if (!activeChatSession.relatedType || !activeChatSession.relatedId) return null;
+                        const isOrder = activeChatSession.relatedType.toLowerCase().includes('order');
+                        const label = isOrder ? `📦 Order #${activeChatSession.relatedId}` : `⚖️ ${activeChatSession.relatedType.charAt(0).toUpperCase() + activeChatSession.relatedType.slice(1)} #${activeChatSession.relatedId}`;
+                        return (
+                          <button onClick={() => setTab(isOrder ? 'orders' : 'disputes')} style={{ marginTop: 4, padding: '2px 10px', borderRadius: 12, border: 'none', fontSize: 11, fontWeight: 600, cursor: 'pointer', background: isOrder ? '#e8f5e9' : '#fde8e8', color: isOrder ? '#2e7d32' : '#c62828' }}>{label}</button>
+                        );
+                      })()}
+                      {(() => {
+                        if (!activeChatSession.slaDeadline) return null;
+                        const diff = new Date(activeChatSession.slaDeadline).getTime() - Date.now();
+                        if (diff <= 0) return <div style={{ fontSize: 11, color: '#c62828', fontWeight: 700, marginTop: 2 }}>⏰ SLA: OVERDUE</div>;
+                        const h = Math.floor(diff / 3600000);
+                        const m = Math.floor((diff % 3600000) / 60000);
+                        return <div style={{ fontSize: 11, color: '#856404', fontWeight: 600, marginTop: 2 }}>⏰ SLA: {h}h {m}m left</div>;
+                      })()}
                     </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <select onChange={e => { if (e.target.value) assignChatSession(activeChatSession.id, e.target.value); }} style={{ padding: '4px 8px', fontSize: 11, borderRadius: 3, border: '1px solid #ddd' }}>
                         <option value="">Assign to...</option>
                         {moderators.map((m: any) => <option key={m.id} value={m.id}>{m.name || m.username}</option>)}
                       </select>
+                      <button className="btn btn-sm" style={{ background: '#17a2b8', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} disabled={!adminUserId} title={adminUserId ? 'Take this ticket' : 'No admin user loaded'} onClick={async () => { if (adminUserId) { await assignChatSession(activeChatSession.id, adminUserId); openChatSessionAdmin(activeChatSession.id); } }}>Take</button>
+                      <button className="btn btn-sm" style={{ background: '#6c757d', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={async () => { try { await fetch('/api/chat/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unassign', sessionId: activeChatSession.id }) }); fetchChatSessions(chatSessionFilter); openChatSessionAdmin(activeChatSession.id); toast('Ticket unassigned', 'success'); } catch { toast('Failed to unassign', 'error'); } }}>Unassign</button>
                       <button className="btn btn-sm" style={{ background: '#7b1fa2', color: '#fff', border: 'none', padding: '4px 10px', fontSize: 11, borderRadius: 4 }} onClick={() => resolveChatSession(activeChatSession.id)}>Resolve</button>
                     </div>
                   </div>
@@ -2032,9 +2426,10 @@ export function AdminDashboard() {
             <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ fontSize: 12, color: "#888" }}>Current balance: <strong>{money(topupUser.balance)}</strong></div>
               <div><label className="label">Amount ($)</label><input type="number" step="0.01" min="0.01" value={topupAmount} onChange={e => setTopupAmount(e.target.value)} className="input" required /></div>
+              <div><label className="label">Reason (optional)</label><input type="text" value={topupReason} onChange={e => setTopupReason(e.target.value)} className="input" placeholder="e.g. compensation, bonus..." /></div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setTopupUser(null)}>Cancel</button>
-                <button className="btn btn-primary" style={{ flex: 1 }} onClick={async () => { await doUserAction("topup", topupUser.id, { amount: topupAmount }); setTopupUser(null); }}>Add Balance</button>
+                <button className="btn btn-primary" style={{ flex: 1 }} onClick={async () => { await doUserAction("topup", topupUser.id, { amount: topupAmount, reason: topupReason }); setTopupUser(null); }}>Add Balance</button>
               </div>
             </div>
           </div>
@@ -2081,6 +2476,13 @@ export function AdminDashboard() {
           <div style={{ background: "#fff", borderRadius: 6, width: 440, maxWidth: "90vw" }} onClick={e => e.stopPropagation()}>
             <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", fontWeight: 600 }}>Edit: {editProduct.title}</div>
             <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ background: '#f9f9f9', borderRadius: 6, padding: '10px 12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 11 }}>
+                <div><span style={{ color: '#888' }}>Platform:</span> <strong>{platformLabel(editProduct.platform)}</strong></div>
+                <div><span style={{ color: '#888' }}>Category:</span> <strong>{editProduct.category || '—'}</strong></div>
+                <div><span style={{ color: '#888' }}>Accounts:</span> <strong>{((editProduct.accountsData || '').split(/\r?\n/).filter(Boolean).length) || editProduct.stock}</strong></div>
+                <div><span style={{ color: '#888' }}>Status:</span> <span className={`badge badge-${editProduct.status}`} style={{ fontSize: 10 }}>{editProduct.status}</span></div>
+                <div><span style={{ color: '#888' }}>SKU:</span> <strong>#{(editProduct as any).sku || 'N/A'}</strong></div>
+              </div>
               <div><label className="label">Title</label><input type="text" value={epTitle} onChange={e => setEpTitle(e.target.value)} className="input" /></div>
               <div><label className="label">Description</label><textarea value={epDesc} onChange={e => setEpDesc(e.target.value)} className="input" rows={3} /></div>
               <div style={{ display: "flex", gap: 8 }}>
@@ -2153,6 +2555,100 @@ export function AdminDashboard() {
                   }
                   setVrRejectId(null); loadAll();
                 }}>Reject & Apply Penalty</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hide Notice Modal */}
+      {hideNotice && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setHideNotice(null)}>
+          <div style={{ background: "#fff", borderRadius: 6, width: 440, maxWidth: "90vw" }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", fontWeight: 600, fontSize: 15 }}>Hide Notice from Users</div>
+            <div style={{ padding: 16 }}>
+              <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>Notice: {hideNotice.title}. Select users who should NOT see this notice.</div>
+              <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid #eee", borderRadius: 4, marginBottom: 12 }}>
+                {users.map(u => (
+                  <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", cursor: "pointer", borderBottom: "1px solid #f5f5f5" }}>
+                    <input type="checkbox" checked={hideNoticeUserIds.has(u.id)} onChange={e => { const s = new Set(hideNoticeUserIds); if (e.target.checked) s.add(u.id); else s.delete(u.id); setHideNoticeUserIds(s); }} />
+                    <span style={{ fontSize: 12 }}>{u.name || u.username} <span style={{ color: "#888" }}>({u.email})</span></span>
+                  </label>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setHideNotice(null)}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex: 1 }} onClick={saveHideUsers}>Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Preview Product Accounts Modal */}
+      {previewProduct && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setPreviewProduct(null)}>
+          <div style={{ background: "#fff", borderRadius: 6, width: 560, maxWidth: "90vw" }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", fontWeight: 600, fontSize: 15 }}>Preview Accounts: {previewProduct.title}</div>
+            <div style={{ padding: 16 }}>
+              <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>Vendor: @{previewProduct.vendor?.username} · {money(previewProduct.storePrice)}/ea</div>
+              {previewProduct.accountsData ? (
+                <>
+                  <pre style={{ fontSize: 11, background: "#111", color: "#3ea136", padding: 10, borderRadius: 4, maxHeight: 360, overflow: "auto", fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{previewProduct.accountsData.split(/\r?\n/).filter(Boolean).slice(0, 10).join('\n')}</pre>
+                  <div style={{ fontSize: 11, color: "#888", marginTop: 6 }}>Showing first 10 of {previewProduct.accountsData.split(/\r?\n/).filter(Boolean).length}</div>
+                </>
+              ) : (
+                <div style={{ padding: 20, color: "#888", fontSize: 12, textAlign: "center" }}>No accounts uploaded.</div>
+              )}
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setPreviewProduct(null)}>Close</button>
+                {previewProduct.status === 'pending' && <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => { doProductAction('approve', previewProduct.id); setPreviewProduct(null); }}>Approve</button>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject All Pending Products Modal */}
+      {rejectAllOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setRejectAllOpen(false)}>
+          <div style={{ background: "#fff", borderRadius: 6, width: 420, maxWidth: "90vw" }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", fontWeight: 600, color: "#e53e3e" }}>Reject All Pending Products</div>
+            <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ fontSize: 12, color: "#888" }}>{products.filter(p => p.status === "pending").length} pending products will be rejected. The vendors will be notified with this reason.</div>
+              <div><label className="label">Reason for rejection</label><textarea value={rejectAllReason} onChange={e => setRejectAllReason(e.target.value)} className="input" rows={3} required placeholder="Explain why these listings were rejected..." /></div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setRejectAllOpen(false)}>Cancel</button>
+                <button className="btn btn-danger" style={{ flex: 1 }} disabled={!rejectAllReason.trim()} onClick={async () => {
+                  const ids = products.filter(p => p.status === "pending").map(p => p.id);
+                  if (!ids.length) { setRejectAllOpen(false); return; }
+                  try {
+                    const res = await fetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'batch_reject', ids, reason: rejectAllReason }) });
+                    const r = await res.json();
+                    if (r.success) { toast(`${r.count} products rejected`, 'success'); setRejectAllOpen(false); setRejectAllReason(''); setPendingQueueSelected(new Set()); loadAll(); }
+                    else toast(r.error || 'Failed to reject', 'error');
+                  } catch { toast('Failed to reject', 'error'); }
+                }}>Reject All</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* View Accounts Modal */}
+      {viewAccountsProduct && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setViewAccountsProduct(null)}>
+          <div style={{ background: "#fff", borderRadius: 6, width: 560, maxWidth: "90vw" }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", fontWeight: 600, fontSize: 15 }}>Accounts: {viewAccountsProduct.title}</div>
+            <div style={{ padding: 16 }}>
+              <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>Vendor: @{viewAccountsProduct.vendor?.username} · {viewAccountsProduct.stock || 0} accounts</div>
+              {viewAccountsProduct.accountsData ? (
+                <pre style={{ fontSize: 11, background: "#111", color: "#3ea136", padding: 10, borderRadius: 4, maxHeight: 360, overflow: "auto", fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{viewAccountsProduct.accountsData}</pre>
+              ) : (
+                <div style={{ padding: 20, color: "#888", fontSize: 12, textAlign: "center" }}>No accounts uploaded yet</div>
+              )}
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setViewAccountsProduct(null)}>Close</button>
               </div>
             </div>
           </div>

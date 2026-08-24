@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { toast } from "@/components/accs/widgets/toast";
 
 const DEFAULT_SETTINGS: Record<string, string> = {
   site_name: "AccsPoint", site_description: "", promotion_notice: "",
@@ -118,6 +119,11 @@ export function AdminSettings() {
     { key: "referral", label: "🔗", name: "Referral" },
     { key: "pages", label: "📄", name: "Pages" },
     { key: "toggles", label: "🔧", name: "Toggles" },
+    { key: "security", label: "🔒", name: "Security" },
+    { key: "email", label: "📧", name: "Email" },
+    { key: "rules", label: "⚙️", name: "Marketplace Rules" },
+    { key: "backup", label: "💾", name: "Backup" },
+    { key: "misc", label: "🔧", name: "Misc" },
   ];
 
   const s = (key: string) => settings[key] || DEFAULT_SETTINGS[key] || "";
@@ -395,6 +401,116 @@ export function AdminSettings() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* SECURITY */}
+        {section === "security" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>🔒 Security & Compliance</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+              <div><label style={labelStyle}>Force 2FA for Vendors</label>
+                <select style={inputStyle} value={s("force_vendor_2fa")} onChange={e => update("force_vendor_2fa", e.target.value)}>
+                  <option value="false">No</option><option value="true">Yes</option>
+                </select>
+                <div style={hintStyle}>Vendors must enable 2FA to list products</div>
+              </div>
+              <div><label style={labelStyle}>Max Deposit ($)</label><input type="number" step="0.01" style={inputStyle} value={s("max_deposit")} onChange={e => update("max_deposit", e.target.value)} /><div style={hintStyle}>Max single deposit amount (0 = unlimited)</div></div>
+              <div><label style={labelStyle}>Min Withdrawal ($)</label><input type="number" step="0.01" style={inputStyle} value={s("min_withdrawal")} onChange={e => update("min_withdrawal", e.target.value)} /><div style={hintStyle}>Minimum vendor payout amount</div></div>
+              <div><label style={labelStyle}>Max Withdrawal/Day ($)</label><input type="number" step="0.01" style={inputStyle} value={s("max_withdrawal_per_day")} onChange={e => update("max_withdrawal_per_day", e.target.value)} /><div style={hintStyle}>0 = unlimited</div></div>
+              <div><label style={labelStyle}>Withdrawal Cooldown (hours)</label><input type="number" style={inputStyle} value={s("withdrawal_cooldown_hours")} onChange={e => update("withdrawal_cooldown_hours", e.target.value)} /><div style={hintStyle}>Wait time between withdrawals</div></div>
+              <div><label style={labelStyle}>Min Password Length</label><input type="number" min="4" max="32" style={inputStyle} value={s("min_password_length")} onChange={e => update("min_password_length", e.target.value)} /></div>
+              <div><label style={labelStyle}>Require Special Char</label>
+                <select style={inputStyle} value={s("require_special_char")} onChange={e => update("require_special_char", e.target.value)}>
+                  <option value="false">No</option><option value="true">Yes</option>
+                </select>
+              </div>
+              <div><label style={labelStyle}>Session Lifetime (hours)</label><input type="number" style={inputStyle} value={s("session_lifetime_hours")} onChange={e => update("session_lifetime_hours", e.target.value)} /><div style={hintStyle}>0 = browser session only</div></div>
+              <div><label style={labelStyle}>Require KYC</label>
+                <select style={inputStyle} value={s("kyc_required")} onChange={e => update("kyc_required", e.target.value)}>
+                  <option value="false">No</option><option value="true">Yes</option>
+                </select>
+                <div style={hintStyle}>Users must verify ID before withdrawing</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* EMAIL */}
+        {section === "email" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>📧 Email & SMTP</h3>
+            <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>Configure SMTP to send transactional emails (purchase receipts, password resets, etc.).</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+              <div><label style={labelStyle}>SMTP Host</label><input style={inputStyle} value={s("smtp_host")} onChange={e => update("smtp_host", e.target.value)} placeholder="smtp.gmail.com" /></div>
+              <div><label style={labelStyle}>SMTP Port</label><input type="number" style={inputStyle} value={s("smtp_port")} onChange={e => update("smtp_port", e.target.value)} placeholder="587" /></div>
+              <div><label style={labelStyle}>SMTP Username</label><input style={inputStyle} value={s("smtp_user")} onChange={e => update("smtp_user", e.target.value)} /></div>
+              <div><label style={labelStyle}>SMTP Password</label><input type="password" style={inputStyle} value={s("smtp_pass")} onChange={e => update("smtp_pass", e.target.value)} /></div>
+              <div><label style={labelStyle}>From Address</label><input type="email" style={inputStyle} value={s("smtp_from")} onChange={e => update("smtp_from", e.target.value)} placeholder="noreply@accspoint.com" /></div>
+              <div><label style={labelStyle}>Email Enabled</label>
+                <select style={inputStyle} value={s("email_enabled")} onChange={e => update("email_enabled", e.target.value)}>
+                  <option value="false">No (log only)</option><option value="true">Yes</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+              <div><label style={labelStyle}>Etherscan API Key</label><input style={inputStyle} value={s("etherscan_api_key")} onChange={e => update("etherscan_api_key", e.target.value)} placeholder="Free API key from etherscan.io" /><div style={hintStyle}>Required for ETH deposit verification</div></div>
+              <div><label style={labelStyle}>BscScan API Key</label><input style={inputStyle} value={s("bscscan_api_key")} onChange={e => update("bscscan_api_key", e.target.value)} placeholder="Free API key from bscscan.com" /><div style={hintStyle}>Required for BSC deposit verification</div></div>
+            </div>
+          </div>
+        )}
+
+        {/* MARKETPLACE RULES */}
+        {section === "rules" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>⚙️ Marketplace Rules</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+              <div><label style={labelStyle}>Dispute Window (hours)</label><input type="number" style={inputStyle} value={s("dispute_window_hours")} onChange={e => update("dispute_window_hours", e.target.value)} /><div style={hintStyle}>How long buyers can open disputes</div></div>
+              <div><label style={labelStyle}>Min Vendor Price ($)</label><input type="number" step="0.01" style={inputStyle} value={s("min_vendor_price")} onChange={e => update("min_vendor_price", e.target.value)} /><div style={hintStyle}>Minimum price vendors can set</div></div>
+              <div><label style={labelStyle}>Max Vendor Price ($)</label><input type="number" step="0.01" style={inputStyle} value={s("max_vendor_price")} onChange={e => update("max_vendor_price", e.target.value)} /><div style={hintStyle}>Maximum price vendors can set</div></div>
+              <div><label style={labelStyle}>Max Accounts Per Upload</label><input type="number" style={inputStyle} value={s("max_accounts_per_upload")} onChange={e => update("max_accounts_per_upload", e.target.value)} /><div style={hintStyle}>0 = unlimited</div></div>
+              <div><label style={labelStyle}>Allowed Platforms</label><textarea style={{ ...inputStyle, minHeight: 60 }} rows={2} value={s("allowed_platforms")} onChange={e => update("allowed_platforms", e.target.value)} placeholder="instagram, tiktok, twitter, ..." /><div style={hintStyle}>Comma-separated. Leave empty to allow all.</div></div>
+              <div><label style={labelStyle}>Delivery Formats</label><textarea style={{ ...inputStyle, minHeight: 60 }} rows={2} value={s("delivery_formats")} onChange={e => update("delivery_formats", e.target.value)} placeholder="email:pass, user:pass:mail:mailpass" /><div style={hintStyle}>Comma-separated. Leave empty to allow all.</div></div>
+            </div>
+          </div>
+        )}
+
+        {/* BACKUP & MAINTENANCE */}
+        {section === "backup" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>💾 Backup & Maintenance</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 10 }}>
+              <div style={{ padding: 14, borderRadius: 8, border: "2px solid #eee", background: "#fff" }}>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Cache</div>
+                <div style={{ fontSize: 11, color: "#888", marginBottom: 8 }}>Clear Vercel/Next.js ISR cache. Pages will be re-generated on the next request.</div>
+                <button className="btn btn-primary btn-sm" onClick={() => { fetch('/api/admin/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_functions', function: 'clear_cache' }) }).then(r => r.json()).then(r => { if (r.success) toast('Cache cleared', 'success'); else toast(r.error || 'Failed', 'error'); }); }}>🗑️ Clear Cache</button>
+              </div>
+              <div style={{ padding: 14, borderRadius: 8, border: "2px solid #eee", background: "#fff" }}>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>System Status</div>
+                <div style={{ fontSize: 11, color: "#888", marginBottom: 8 }}>Current database and site status.</div>
+                <button className="btn btn-secondary btn-sm" onClick={() => { fetch('/api/admin/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'admin_functions', function: 'system_status' }) }).then(r => r.json()).then(r => { if (r.success) toast(JSON.stringify(r.status), 'info'); }); }}>📊 Check Status</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MISC */}
+        {section === "misc" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>🔧 Miscellaneous</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+              <div><label style={labelStyle}>Terms Version</label><input style={inputStyle} value={s("terms_version")} onChange={e => update("terms_version", e.target.value)} placeholder="1.0" /><div style={hintStyle}>Increment to force re-acceptance</div></div>
+              <div><label style={labelStyle}>Currency Symbol</label><input style={inputStyle} value={s("currency_symbol")} onChange={e => update("currency_symbol", e.target.value)} /></div>
+              <div><label style={labelStyle}>Site Logo URL</label><input style={inputStyle} value={s("site_logo_url")} onChange={e => update("site_logo_url", e.target.value)} placeholder="https://..." /><div style={hintStyle}>Replaces the text logo</div></div>
+              <div><label style={labelStyle}>Search Placeholder</label><input style={inputStyle} value={s("search_placeholder")} onChange={e => update("search_placeholder", e.target.value)} placeholder="Search for accounts..." /></div>
+              <div style={{ gridColumn: "1 / -1" }}><label style={labelStyle}>Cookie Consent Banner</label>
+                <select style={inputStyle} value={s("cookie_consent_enabled")} onChange={e => update("cookie_consent_enabled", e.target.value)}>
+                  <option value="false">Disabled</option><option value="true">Enabled</option>
+                </select>
+              </div>
+              <div><label style={labelStyle}>Custom CSS</label><textarea style={{ ...inputStyle, minHeight: 80, fontFamily: "monospace" }} rows={3} value={s("custom_css")} onChange={e => update("custom_css", e.target.value)} placeholder="/* custom styles */" /></div>
+              <div><label style={labelStyle}>Custom JS</label><textarea style={{ ...inputStyle, minHeight: 80, fontFamily: "monospace" }} rows={3} value={s("custom_js")} onChange={e => update("custom_js", e.target.value)} placeholder="// custom analytics or scripts" /><div style={hintStyle}>⚠️ Injected directly into &lt;head&gt;. Use with caution.</div></div>
             </div>
           </div>
         )}

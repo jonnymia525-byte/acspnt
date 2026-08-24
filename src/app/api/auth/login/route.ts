@@ -25,11 +25,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Too many login attempts. Please try again in 15 minutes." }, { status: 429 });
     }
 
-    const { username, password, captchaAnswer, captchaHash } = await req.json();
+    const { username, password, captchaAnswer, captchaA, captchaB, remember } = await req.json();
     if (!username || !password) return NextResponse.json({ error: "Username and password required" }, { status: 400 });
     // Enforce max length to prevent DoS via huge payloads
     if (username.length > 100 || password.length > 200) {
       return NextResponse.json({ error: "Input too long" }, { status: 400 });
+    }
+
+    // Server-side captcha check
+    if (captchaAnswer == null || captchaA == null || captchaB == null || Number(captchaAnswer) !== Number(captchaA) + Number(captchaB)) {
+      return NextResponse.json({ error: "Invalid captcha" }, { status: 400 });
     }
 
     // Find user by username or email
@@ -48,16 +53,20 @@ export async function POST(req: Request) {
     if (!valid) return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
 
     // Check blocked
-    if (user.blocked) return NextResponse.json({ error: "Account is blocked" }, { status: 403 });
+    if (user.blocked) return NextResponse.json({ error: "Account suspended. Contact support." }, { status: 403 });
 
     // 2FA check
     if (user.twoFaEnabled) {
       return NextResponse.json({ twoFaRequired: true, userId: user.id, username: user.username });
     }
 
-    // Set cookie
+    // Set cookie (30 days if "remember me", otherwise session cookie)
     const cookieStore = await cookies();
-    cookieStore.set("accsm_user_id", user.id, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 30 * 24 * 60 * 60 });
+    if (remember) {
+      cookieStore.set("accsm_user_id", user.id, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 30 * 24 * 60 * 60 });
+    } else {
+      cookieStore.set("accsm_user_id", user.id, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/" });
+    }
 
     // Update last login
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });

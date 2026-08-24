@@ -1,5 +1,18 @@
 import { create } from "zustand";
 
+function getInitialTheme(): string {
+  if (typeof window === "undefined") return "light";
+  try {
+    const saved = localStorage.getItem("accsm-theme");
+    const next = saved === "dark" ? "dark" : "light";
+    if (next === "dark") document.documentElement.classList.add("dark");
+    else document.documentElement.classList.remove("dark");
+    return next;
+  } catch {
+    return "light";
+  }
+}
+
 export interface User {
   id: string;
   email: string;
@@ -26,7 +39,7 @@ interface AppState {
 export const useStore = create<AppState>((set) => ({
   user: null,
   setUser: (user) => set({ user }),
-  theme: "light",
+  theme: getInitialTheme(),
   toggleTheme: () =>
     set((s) => {
       const next = s.theme === "light" ? "dark" : "light";

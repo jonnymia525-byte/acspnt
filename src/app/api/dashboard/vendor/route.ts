@@ -46,15 +46,15 @@ export async function GET() {
     }),
     prisma.product.findMany({
       where: { vendorId: userId },
-      select: { id: true, title: true, platform: true, vendorPrice: true, storePrice: true, stock: true, status: true },
+      select: { id: true, title: true, platform: true, category: true, vendorPrice: true, storePrice: true, stock: true, status: true, accountsData: true, sku: true },
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
     prisma.purchase.findMany({
       where: { product: { vendorId: userId } },
-      select: { id: true, quantity: true, total: true, createdAt: true, product: { select: { title: true } }, buyer: { select: { username: true } } },
+      select: { id: true, quantity: true, total: true, createdAt: true, product: { select: { id: true, title: true } }, buyer: { select: { username: true } } },
       orderBy: { createdAt: "desc" },
-      take: 50,
+      take: 200,
     }),
     prisma.withdrawal.findMany({
       where: { userId },
@@ -82,6 +82,22 @@ export async function GET() {
   const totalRevenue = salesData.reduce((sum, p) => sum + p.product.vendorPrice * p.quantity, 0);
   const totalUnits = salesData.reduce((sum, p) => sum + p.quantity, 0);
   const avgRating = reviewAgg._avg.rating ? Math.round(reviewAgg._avg.rating * 10) / 10 : 0;
+
+  // Per-product sold count (total quantity purchased)
+  const soldByProduct = new Map<string, number>();
+  for (const s of sales) {
+    const pid = (s as any).product?.id;
+    if (pid) soldByProduct.set(pid, (soldByProduct.get(pid) || 0) + s.quantity);
+  }
+
+  const productsWithStats = products.map(p => {
+    const soldCount = soldByProduct.get(p.id) || 0;
+    return {
+      ...p,
+      soldCount,
+      totalUploaded: p.stock + soldCount,
+    };
+  });
 
   // Account inventory stats: total accounts across all products
   const allProducts = await prisma.product.findMany({
@@ -116,7 +132,7 @@ export async function GET() {
       liveAccounts,
     },
     stockAlerts: { lowStock, outOfStock },
-    products,
+    products: productsWithStats,
     sales,
     withdrawals,
     deposits,

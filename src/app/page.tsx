@@ -2,17 +2,24 @@ import { prisma } from "@/lib/prisma";
 import { platformColor, platformIcon, platformLabel } from "@/lib/totp";
 import { StorefrontClient } from "@/components/accs/storefront-client";
 import { PageRouter } from "@/components/accs/page-router";
+import { cookies } from "next/headers";
 export const revalidate = 30;
 
 export default async function HomePage() {
-  const isAdmin = false;
+  const cookieStore = await cookies();
+  const cookieUserId = cookieStore.get("accsm_user_id")?.value;
+  let isAdmin = false;
+  if (cookieUserId) {
+    const cookieUser = await prisma.user.findUnique({ where: { id: cookieUserId }, select: { role: true } });
+    if (cookieUser?.role === "admin") isAdmin = true;
+  }
 
   const [listings] = await Promise.all([
     prisma.listing.findMany({
       where: isAdmin ? {} : { visible: true },
       include: {
         products: {
-          where: { status: "approved", visible: true },
+          where: isAdmin ? { status: "approved" } : { status: "approved", visible: true },
           include: { vendor: { select: { id: true, username: true, vendorCountry: true, vendorStatus: true } } },
           orderBy: { storePrice: "asc" },
         },
@@ -89,7 +96,7 @@ export default async function HomePage() {
     });
 
   const featured = await prisma.product.findMany({
-    where: { status: "approved", visible: true, stock: { gt: 0 } },
+    where: isAdmin ? { status: "approved", stock: { gt: 0 } } : { status: "approved", visible: true, stock: { gt: 0 } },
     include: {
       vendor: { select: { id: true, username: true } },
       listing: { select: { id: true, title: true, platform: true } },

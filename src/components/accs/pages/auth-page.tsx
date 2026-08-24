@@ -65,15 +65,6 @@ export function AuthPage({ initialTab }: Props) {
   const [login2fa, setLogin2fa] = useState("");
   const [loginRemember, setLoginRemember] = useState(false);
 
-  // Forgot password flow
-  const [resetStep, setResetStep] = useState<"idle" | "email" | "code" | "newpass" | "done">("idle");
-  const [resetEmail, setResetEmail] = useState("");
-  const [resetCode, setResetCode] = useState("");
-  const [resetNewPass, setResetNewPass] = useState("");
-  const [resetConfirm, setResetConfirm] = useState("");
-  const [resetUserId, setResetUserId] = useState("");
-  const [resetInfo, setResetInfo] = useState("");
-
   const [regUser, setRegUser] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regPass, setRegPass] = useState("");
@@ -144,40 +135,9 @@ export function AuthPage({ initialTab }: Props) {
     setVerifyLoading(false);
   };
 
-  const handleResetRequest = async (e: React.FormEvent) => {
-    e.preventDefault(); setLoading(true); setError("");
-    try {
-      const res = await fetch("/api/auth/password-reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "request", email: resetEmail }) });
-      const data = await res.json();
-      if (data.success) { setResetInfo("If that email exists, a 6-digit reset code has been sent to it."); setResetStep("code"); }
-      else setError(data.error || "Request failed");
-    } catch { setError("Network error"); }
-    setLoading(false);
-  };
+  
 
-  const handleResetVerify = async (e: React.FormEvent) => {
-    e.preventDefault(); setLoading(true); setError("");
-    try {
-      const res = await fetch("/api/auth/password-reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "verify", email: resetEmail, code: resetCode }) });
-      const data = await res.json();
-      if (data.success) { setResetUserId(data.userId); setResetStep("newpass"); }
-      else setError(data.error || "Invalid or expired code");
-    } catch { setError("Network error"); }
-    setLoading(false);
-  };
-
-  const handleResetNewPass = async (e: React.FormEvent) => {
-    e.preventDefault(); setLoading(true); setError("");
-    if (resetNewPass.length < 8 || !/[0-9]/.test(resetNewPass)) { setError("Password must be at least 8 characters and contain a number"); setLoading(false); return; }
-    if (resetNewPass !== resetConfirm) { setError("Passwords do not match"); setLoading(false); return; }
-    try {
-      const res = await fetch("/api/auth/password-reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reset", userId: resetUserId, code: resetCode, newPassword: resetNewPass }) });
-      const data = await res.json();
-      if (data.success) { setResetStep("done"); }
-      else setError(data.error || "Reset failed");
-    } catch { setError("Network error"); }
-    setLoading(false);
-  };
+  
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault(); setLoading(true); setError("");
@@ -244,7 +204,7 @@ export function AuthPage({ initialTab }: Props) {
         <div className="panel">
           <div style={{ display: "flex", borderBottom: "1px solid #eee" }}>
             {([["login", "Login"], ["signup", "Sign Up"], ["seller", "Become a Seller"]] as const).map(([k, l]) => (
-              <button key={k} onClick={() => { setTab(k); setError(""); setFieldErrors({}); setSellerStep(1); setSignupSuccess(false); setSellerSubmitted(false); setVerifyEmailStep(false); setVerifyInfo(""); setVerifyCode(""); setResetStep("idle"); }}
+              <button key={k} onClick={() => { setTab(k); setError(""); setFieldErrors({}); setSellerStep(1); setSignupSuccess(false); setSellerSubmitted(false); setVerifyEmailStep(false); setVerifyInfo(""); setVerifyCode(""); }}
                 style={{ flex: 1, padding: "10px 0", fontSize: 13, fontWeight: 600, cursor: "pointer", background: "none", border: "none", borderBottom: tab === k ? "2px solid #3ea136" : "2px solid transparent", color: tab === k ? "#3ea136" : "#888" }}>
                 {l}
               </button>
@@ -278,52 +238,6 @@ export function AuthPage({ initialTab }: Props) {
                 <p style={{ fontSize: 13, color: "#666", lineHeight: 1.6 }}>Thank you! Our team will review your application and contact you within 48 hours via your chosen contact method.</p>
                 <Link href="/" className="btn btn-primary" style={{ display: "block", marginTop: 12 }}>Back to Store</Link>
               </div>
-            ) : resetStep === "done" ? (
-              <div style={{ textAlign: "center", padding: 20 }}>
-                <div style={{ width: 60, height: 60, borderRadius: 30, background: "#e8f5e9", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><span style={{ fontSize: 28, color: "#3ea136" }}>✓</span></div>
-                <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Password Reset!</h2>
-                <p style={{ fontSize: 13, color: "#666", lineHeight: 1.6 }}>Your password has been updated. You can now log in with your new password.</p>
-                <button type="button" onClick={() => { setResetStep("idle"); setError(""); setResetEmail(""); setResetCode(""); setResetNewPass(""); setResetConfirm(""); setResetUserId(""); setTab("login"); }} className="btn btn-primary" style={{ width: "100%", marginTop: 12 }}>Go to Login</button>
-              </div>
-            ) : resetStep === "newpass" ? (
-              <form onSubmit={handleResetNewPass} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ fontSize: 13, color: "#555" }}>Enter your new password.</div>
-                <div>
-                  <label className="label">New Password</label>
-                  <input type="password" value={resetNewPass} onChange={e => setResetNewPass(e.target.value)} className="input" autoComplete="new-password" required minLength={8} />
-                </div>
-                <div>
-                  <label className="label">Confirm New Password</label>
-                  <input type="password" value={resetConfirm} onChange={e => setResetConfirm(e.target.value)} className="input" autoComplete="new-password" required />
-                </div>
-                <button type="submit" disabled={loading} className="btn btn-primary" style={{ width: "100%" }}>
-                  {loading ? "Resetting..." : "Reset Password"}
-                </button>
-                <button type="button" onClick={() => { setResetStep("idle"); setError(""); }} className="btn btn-ghost" style={{ width: "100%", fontSize: 12 }}>Back to Login</button>
-              </form>
-            ) : resetStep === "code" ? (
-              <form onSubmit={handleResetVerify} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {resetInfo && <div style={{ fontSize: 12, color: "#3ea136", background: "#e8f5e9", padding: 8, borderRadius: 6, marginBottom: 4 }}>{resetInfo}</div>}
-                <div style={{ fontSize: 13, color: "#555" }}>Enter the 6-digit reset code sent to <strong>{resetEmail}</strong>.</div>
-                <input type="text" maxLength={6} value={resetCode} onChange={e => setResetCode(e.target.value.replace(/\D/g, ""))}
-                  className="input" style={{ textAlign: "center", fontSize: 20, letterSpacing: 6, fontFamily: "monospace" }} placeholder="000000" autoFocus />
-                <button type="submit" disabled={loading || resetCode.length !== 6} className="btn btn-primary" style={{ width: "100%" }}>
-                  {loading ? "Verifying..." : "Verify Code"}
-                </button>
-                <button type="button" onClick={() => { setResetStep("email"); setError(""); }} className="btn btn-ghost" style={{ width: "100%", fontSize: 12 }}>Back</button>
-              </form>
-            ) : resetStep === "email" ? (
-              <form onSubmit={handleResetRequest} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ fontSize: 13, color: "#555" }}>Forgot your password? Enter your account email and we'll send you a reset code.</div>
-                <div>
-                  <label className="label">Email</label>
-                  <input type="email" value={resetEmail} onChange={e => setResetEmail(e.target.value)} className="input" autoComplete="email" required />
-                </div>
-                <button type="submit" disabled={loading || !resetEmail.trim()} className="btn btn-primary" style={{ width: "100%" }}>
-                  {loading ? "Sending..." : "Send Reset Code"}
-                </button>
-                <button type="button" onClick={() => { setResetStep("idle"); setError(""); }} className="btn btn-ghost" style={{ width: "100%", fontSize: 12 }}>Back to Login</button>
-              </form>
             ) : twoFaStep ? (
               <form onSubmit={handle2fa} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <div style={{ fontSize: 13, color: "#555" }}>Hi <strong>{twoFaUsername}</strong> &mdash; enter your 6-digit code.</div>
@@ -356,16 +270,10 @@ export function AuthPage({ initialTab }: Props) {
                 <button type="submit" disabled={loading || captcha === null} className="btn btn-primary" style={{ width: "100%" }}>
                   {loading ? "Logging in..." : "Login"}
                 </button>
-<<<<<<< ours
+<GoogleButton />
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Link href="/?page=forgot-password" style={{ fontSize: 12, color: '#e53e3e' }}>Forgot password?</Link>
                   <Link href="/?page=register" style={{ fontSize: 12, color: '#3ea136' }}>No account? Sign up</Link>
-=======
-                <GoogleButton />
-                <div style={{ textAlign: "center", display: "flex", justifyContent: "center", gap: 12 }}>
-                  <button type="button" onClick={() => { setResetStep("email"); setResetEmail(""); setResetInfo(""); setError(""); }} style={{ fontSize: 12, color: "#1976d2", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Forgot password?</button>
-                  <Link href="/?page=register" style={{ fontSize: 12, color: "#3ea136" }}>No account? Sign up</Link>
->>>>>>> theirs
                 </div>
               </form>
             ) : tab === "signup" ? (

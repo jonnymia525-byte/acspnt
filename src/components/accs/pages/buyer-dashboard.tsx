@@ -4,12 +4,9 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useStore } from "@/store";
 import { money } from "@/lib/money";
-<<<<<<< ours
 import { ProfileSettings } from "../widgets/profile-settings";
-=======
 import { NoticeBar } from "@/components/accs/widgets/notice-bar";
 import { toast, Toaster } from "@/components/accs/widgets/toast";
->>>>>>> theirs
 
 
 interface Data {
@@ -19,11 +16,8 @@ interface Data {
   disputes: Array<{ id: string; reason: string; status: string; resolution?: string; refundAmount?: number; createdAt: string; purchase?: { total: number; product: { title: string; platform: string } } | null }>;
   notifications: Array<{ id: string; title: string; message: string; read: boolean; createdAt: string }>;
   deposits: Array<{ id: string; amount: number; method: string; status: string; createdAt: string }>;
-<<<<<<< ours
   loginHistory: Array<{ id: string; action: string; description: string; ip?: string; country?: string; city?: string; createdAt: string }>;
-=======
   pendingDepositAmount?: number;
->>>>>>> theirs
 }
 
 const TABS = [
@@ -37,11 +31,7 @@ const TABS = [
 ];
 
 export function BuyerDashboard() {
-<<<<<<< ours
-  const { setUser } = useStore();
-  const [tab, setTab] = useState('overview');
-=======
-  const { setUser, theme, toggleTheme } = useStore();
+const { setUser, theme, toggleTheme } = useStore();
   const [tab, setTab] = useState(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -49,7 +39,6 @@ export function BuyerDashboard() {
     }
     return 'overview';
   });
->>>>>>> theirs
   const [data, setData] = useState<Data | null>(null);
 
   const [reportId, setReportId] = useState<string | null>(null);
@@ -59,10 +48,7 @@ export function BuyerDashboard() {
 
   const refresh = () => fetch("/api/dashboard/buyer").then(r => r.json()).then(d => { if (d.user) { setData(d); setUser(d.user); } }).catch(() => {});
 
-<<<<<<< ours
-  useEffect(() => { refresh(); }, []);
-=======
-  const confirmReceived = async (purchaseId: string) => {
+const confirmReceived = async (purchaseId: string) => {
     const res = await fetch("/api/purchases/receive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purchaseId }) });
     const r = await res.json();
     if (r.success) { toast("Delivery confirmed", "success"); refresh(); }
@@ -70,7 +56,6 @@ export function BuyerDashboard() {
   };
 
   useEffect(() => { refresh(); }, [setUser]);
->>>>>>> theirs
 
   useEffect(() => {
     if (tab === "notifications") {

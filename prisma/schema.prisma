@@ -631,10 +631,6 @@ model ChatMessage {
   @@index([senderId])
 }
 
-<<<<<<< ours
-=======
-
->>>>>>> theirs
 model PasswordReset {
   id        String   @id @default(cuid())
   userId    String   @unique

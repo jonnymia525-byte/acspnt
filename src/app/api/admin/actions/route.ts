@@ -149,7 +149,6 @@ export async function POST(req: Request) {
         const user = await prisma.user.findUnique({ where: { id: targetId } });
         if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-<<<<<<< ours
         // Atomic transaction: update balance, create deposit record, create transaction record
         const updated = await prisma.$transaction(async (tx) => {
           const u = await tx.user.update({
@@ -160,20 +159,9 @@ export async function POST(req: Request) {
             data: { amount, method: "manual", status: "completed", completedAt: new Date(), userId: user.id },
           });
           await tx.transaction.create({
-            data: { type: "topup", amount, description: "Admin manual top-up", userId: user.id },
+            data: { type: "topup", amount, description: "Admin topup" + (reason ? `: ${reason}` : ""), userId: user.id },
           });
           return u;
-=======
-        const updated = await prisma.user.update({
-          where: { id: user.id },
-          data: { balance: { increment: amount } },
-        });
-        await prisma.deposit.create({
-          data: { amount, method: "manual", status: "completed", completedAt: new Date(), userId: user.id },
-        });
-        await prisma.transaction.create({
-          data: { type: "topup", amount, description: "Admin topup" + (reason ? `: ${reason}` : ""), userId: user.id },
->>>>>>> theirs
         });
 
         await prisma.notification.create({
@@ -277,31 +265,11 @@ export async function POST(req: Request) {
         });
         if (!dispute) return NextResponse.json({ error: "Dispute not found" }, { status: 404 });
 
-<<<<<<< ours
         // CRITICAL: Only open disputes can be resolved (prevents replay refunds)
         if (dispute.status !== "open") {
           return NextResponse.json({ error: `Cannot resolve dispute with status "${dispute.status}"` }, { status: 400 });
         }
 
-        // Atomic: resolve dispute + optional refund in one transaction
-        await prisma.$transaction(async (tx) => {
-          await tx.dispute.update({
-            where: { id: dispute.id },
-            data: { status: "resolved", resolution, resolvedAt: new Date() },
-          });
-          if (refundBuyer && dispute.purchaseId) {
-            const purchase = await tx.purchase.findUnique({ where: { id: dispute.purchaseId } });
-            if (purchase) {
-              await tx.user.update({
-                where: { id: dispute.buyerId },
-                data: { balance: { increment: purchase.total } },
-              });
-              await tx.transaction.create({
-                data: { type: "dispute_refund", amount: purchase.total, description: "Dispute resolved refund", userId: dispute.buyerId },
-              });
-            }
-          }
-=======
         let refundAmount = 0;
         let vendorCharge = 0;
 
@@ -340,7 +308,6 @@ export async function POST(req: Request) {
         await prisma.dispute.update({
           where: { id: dispute.id },
           data: { status: "resolved", resolution, resolvedAt: new Date(), refundAmount, vendorCharge },
->>>>>>> theirs
         });
 
         await prisma.activityLog.create({
